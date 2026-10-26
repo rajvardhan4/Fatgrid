@@ -1,0 +1,212 @@
+import { z } from 'zod';
+import { ApiError, authenticate, equal, id, limits, month, now, passwordHash, rateLimit, safeUser, sessionCookie, sha, type Env } from './auth';
+import type { Database, Row, Statement } from './db';
+import { csvCell, normalizeDomain, parseDomains } from '../shared/domain';
+import { inspectBacklink, providerStatus, publicURL, scanProvider, backlinkSummary, type PublicFetch } from './providers';
+import { checkout, stripeWebhook } from './billing';
+import { groupApi, processGroups } from './monitoring';
+const json=(value:unknown,status=200,headers:Record<string,string>={})=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
+const str=z.string().trim().min(1).max(300);
+const publicUrl=z.string().max(2048).refine(x=>{try{publicURL(x);return true}catch{return false}},'Use a public HTTP(S) URL.');
+const domain=z.string().transform(normalizeDomain).refine(Boolean,'Invalid domain.');
+async function body<T>(request:Request,schema:z.ZodType<T>):Promise<T>{const text=await request.text();if(text.length>1_000_000)throw new ApiError(413,'Request too large.');try{return schema.parse(JSON.parse(text))}catch(e){if(e instanceof z.ZodError)throw new ApiError(400,e.issues.map(x=>`${x.path.join('.')}: ${x.message}`).join('; '));throw new ApiError(400,'Invalid JSON.')}}
+async function own(db:Database,table:string,recordId:string,user:Row){const row=await db.first(`SELECT * FROM ${table} WHERE id=? AND user_id=?`,[recordId,user.id]);if(!row)throw new ApiError(404,'Record not found.');return row;}
+function requireUser(user:Row|null):asserts user is Row {if(!user)throw new ApiError(401,'Log in to continue.','unauthorized');}
+function admin(user:Row){if(user.role!=='admin')throw new ApiError(403,'Administrator access required.');}
+async function addProjectDomains(db:Database,projectId:string,domains:string[],limit:number){
+ const serialized=JSON.stringify([...new Set(domains)]);
+ // Check the whole new batch and insert in one statement, including concurrent requests.
+ await db.run(`INSERT INTO project_domains (id,project_id,domain,created_at)
+ SELECT lower(hex(randomblob(16))),?,value,? FROM json_each(?) j
+ WHERE NOT EXISTS(SELECT 1 FROM project_domains d WHERE d.project_id=? AND d.domain=j.value)
+ AND (SELECT COUNT(*) FROM project_domains WHERE project_id=?)+(SELECT COUNT(*) FROM json_each(?) n WHERE NOT EXISTS(SELECT 1 FROM project_domains d WHERE d.project_id=? AND d.domain=n.value))<=?`,[projectId,now(),serialized,projectId,projectId,serialized,projectId,limit]);
+ const missing=await db.first('SELECT COUNT(*) AS n FROM json_each(?) j WHERE NOT EXISTS(SELECT 1 FROM project_domains d WHERE d.project_id=? AND d.domain=j.value)',[serialized,projectId]);
+ if(missing!.n)throw new ApiError(402,'Project domain limit reached.');
+}
+export async function reserve(db:Database,user:Row,kind:string,query:string,cost:number){
+  const job=id();
+  // Transactional insert + conditional debit; failed debit rolls back the entire reservation.
+  const result=await db.batch([
+    {sql:'INSERT INTO jobs (id,user_id,kind,query,status,cost,created_at) SELECT ?,?,?,?,\'running\',?,? WHERE (SELECT units FROM users WHERE id=?)>=?',args:[job,user.id,kind,query,cost,now(),user.id,cost]},
+    {sql:'UPDATE users SET units=units-? WHERE id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=?) RETURNING units',args:[cost,user.id,job]},
+    {sql:'INSERT INTO ledger (id,user_id,amount,reason,job_id,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs WHERE id=?)',args:[id(),user.id,-cost,kind,job,now(),job]},
+  ]);
+  if(!result[1]?.length)throw new ApiError(402,'Not enough units for this operation. Upgrade your plan or wait for the monthly reset.','insufficient_units');return job;
+}
+export async function finish(db:Database,job:string,result:unknown,unused=0){await db.batch([
+ {sql:"UPDATE users SET units=units+? WHERE id=(SELECT user_id FROM jobs WHERE id=? AND status='running')",args:[unused,job]},
+ {sql:"INSERT INTO ledger (id,user_id,amount,reason,job_id,created_at) SELECT ?,user_id,?,'unused units refunded',id,? FROM jobs WHERE id=? AND status='running' AND ?>0",args:[id(),unused,now(),job,unused]},
+ {sql:"UPDATE jobs SET status='completed',cost=cost-?,result=?,finished_at=? WHERE id=? AND status='running'",args:[unused,JSON.stringify(result),now(),job]},
+]);}
+export async function refund(db:Database,job:string,error:string){await db.batch([
+  {sql:"UPDATE users SET units=units+(SELECT cost FROM jobs WHERE id=?) WHERE id=(SELECT user_id FROM jobs WHERE id=? AND status='running')",args:[job,job]},
+  {sql:"INSERT INTO ledger (id,user_id,amount,reason,job_id,created_at) SELECT ?,user_id,cost,'refund',id,? FROM jobs WHERE id=? AND status='running'",args:[id(),now(),job]},
+  {sql:"UPDATE jobs SET status='failed',error=?,finished_at=? WHERE id=? AND status='running'",args:[error,now(),job]},
+]);}
+export async function recoverStaleJobs(db:Database){const cutoff=new Date(Date.now()-5*60000).toISOString();const rows=await db.all("SELECT id FROM jobs WHERE status='running' AND created_at<? AND NOT EXISTS (SELECT 1 FROM monitor_groups g WHERE g.job_id=jobs.id AND g.status IN ('running','processing') AND g.last_checked>?)",[cutoff,cutoff]);for(const row of rows)await refund(db,row.id,'Operation interrupted; units refunded.');}
+const inventorySelect='SELECT p.*,MIN(o.price) AS price,COUNT(o.id) AS offers,GROUP_CONCAT(DISTINCT o.follow) AS follow,MAX(o.sponsored) AS sponsored,MAX(o.restricted) AS restricted FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1';
+async function inventory(db:Database,search:URLSearchParams){
+  const where:string[]=['1=1'],args:unknown[]=[];
+  for(const [param,column] of [['q','p.domain'],['keyword','p.title']] as const){const value=search.get(param);if(value){where.push(`${column} LIKE ?`);args.push('%'+value+'%')}}
+  for(const [param,column] of [['country','p.country'],['category','p.category'],['language','p.language'],['type','o.type'],['marketplace','o.marketplace'],['follow','o.follow']] as const){const value=search.get(param);if(value&&value!=='All'&&value!=='Any'){where.push(`${column}=?`);args.push(value)}}
+  for(const [param,column,op] of [['minPrice','o.price','>='],['maxPrice','o.price','<='],['minTraffic','p.traffic','>='],['maxTraffic','p.traffic','<='],['minDR','p.dr','>='],['maxDR','p.dr','<='],['minAS','p.authority','>='],['maxAS','p.authority','<=']] as const){const v=search.get(param);if(v!==null&&v!==''&&Number.isFinite(Number(v))){where.push(`${column}${op}?`);args.push(Number(v))}}
+  for(const key of ['sponsored','restricted']){const v=search.get(key);if(v==='0'||v==='1'){where.push(`o.${key}=?`);args.push(Number(v))}}
+  const sorts:Record<string,string>={domain:'p.domain',price:'price',traffic:'p.traffic',authority:'p.authority',dr:'p.dr',offers:'offers'};
+  const sort=sorts[search.get('sort')||'domain']||'p.domain',dir=search.get('direction')==='desc'?'DESC':'ASC';
+  const page=Math.max(1,Math.min(100000,Number(search.get('page'))||1)),size=Math.max(1,Math.min(100,Number(search.get('size'))||25));
+  const condition=' WHERE '+where.join(' AND ');
+  const count=await db.first('SELECT COUNT(DISTINCT p.domain) AS count FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1'+condition,args);
+  const rows=await db.all(inventorySelect+condition+` GROUP BY p.domain ORDER BY ${sort} ${dir},p.domain ASC LIMIT ? OFFSET ?`,[...args,size,(page-1)*size]);
+  return {rows,total:count!.count,page,size};
+}
+export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFetch):Promise<Response>{
+  try{
+    const url=new URL(request.url),path=url.pathname.replace(/\/$/,''),method=request.method;
+    if(path==='/api/internal/tick'&&method==='POST'){
+      // This mode is only configured on the owner-private Sites deployment. Dispatch
+      // authenticates service access before this shared, parameter-free updater runs.
+      const privateDispatch=env.AUTH_MODE==='platform'&&env.PRIVATE_SCHEDULER==='1';
+      if(!privateDispatch&&(!env.CRON_SECRET||!equal(request.headers.get('authorization')||'','Bearer '+env.CRON_SECRET)))throw new ApiError(401,'Unauthorized.');
+      await processGroups(db,env,safeFetch);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
+    }
+    if(path==='/api/billing/webhook'&&method==='POST')return json(await stripeWebhook(request,db,env));
+    if(!['GET','HEAD','OPTIONS'].includes(method)){
+      const origin=request.headers.get('origin');
+      const configuredOrigin=new URL(env.APP_ORIGIN||url.origin);
+      const loopbackOrigin=env.AUTH_MODE!=='platform'&&['localhost','127.0.0.1'].includes(configuredOrigin.hostname)&&origin&&['http://localhost:'+configuredOrigin.port,'http://127.0.0.1:'+configuredOrigin.port].includes(origin);
+      if(origin&&origin!==env.APP_ORIGIN&&origin!==url.origin&&!loopbackOrigin)throw new ApiError(403,'Cross-origin requests are not allowed.');
+      if(request.headers.get('sec-fetch-site')==='cross-site')throw new ApiError(403,'Cross-site requests are not allowed.');
+      if(!request.headers.get('content-type')?.includes('application/json'))throw new ApiError(415,'Content-Type must be application/json.');
+    }
+    const user=await authenticate(request,db,env);
+    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start']});
+    if(path==='/api/health')return json({ok:!!await db.first('SELECT 1 AS ok'),database:'connected'});
+    if(path.startsWith('/api/auth/')){
+      if(env.AUTH_MODE==='platform')throw new ApiError(409,'Use the secure ChatGPT sign-in link on this hosted version.');
+      const ip=request.headers.get('x-client-ip')||'unknown';await rateLimit(db,'auth:'+ip,15,15*60000);
+      if(path==='/api/auth/logout'&&method==='POST'){
+        const token=request.headers.get('cookie')?.match(/(?:^|;\s*)fg_session=([^;]+)/)?.[1];if(token)await db.run('DELETE FROM sessions WHERE token_hash=?',[await sha(token)]);
+        return json({ok:true},200,{'Set-Cookie':'fg_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'});
+      }
+      if((path==='/api/auth/register'||path==='/api/auth/login')&&method==='POST'){
+        const data=await body(request,z.object({email:z.string().email().max(254).transform(s=>s.toLowerCase()),password:z.string().min(8).max(128),name:z.string().trim().max(100).optional()}));
+        let record=await db.first('SELECT * FROM users WHERE email=?',[data.email]);
+        if(path.endsWith('/register')){
+          if(record)throw new ApiError(409,'An account with that email already exists.');
+          const uid=id();await db.run('INSERT INTO users (id,email,name,password_hash,role,period,created_at) VALUES (?,?,?,?,?,?,?)',[uid,data.email,data.name||data.email.split('@')[0],await passwordHash(data.password),'member',month(),now()]);
+          record=await db.first('SELECT * FROM users WHERE id=?',[uid]);
+        }else{
+          const salt=record?.password_hash?.split(':')[1]||'00000000000000000000000000000000';
+          const hash=await passwordHash(data.password,salt);if(!record?.password_hash||!equal(hash,record.password_hash))throw new ApiError(401,'Incorrect email or password.');
+        }
+        return json({user:safeUser(record)},200,{'Set-Cookie':await sessionCookie(db,record!.id,url.protocol==='https:')});
+      }
+      throw new ApiError(404,'Authentication route not found.');
+    }
+    if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams));
+    if(path==='/api/inventory/options'&&method==='GET')return json({countries:await db.all("SELECT DISTINCT country AS value FROM publishers WHERE country<>'' ORDER BY country"),categories:await db.all("SELECT DISTINCT category AS value FROM publishers WHERE category<>'' ORDER BY category"),marketplaces:await db.all('SELECT DISTINCT marketplace AS value FROM offers ORDER BY marketplace')});
+    if(path==='/api/offers'&&method==='GET'){const d=normalizeDomain(url.searchParams.get('domain')||'');return json({publisher:await db.first('SELECT * FROM publishers WHERE domain=?',[d]),offers:await db.all('SELECT * FROM offers WHERE domain=? AND active=1 ORDER BY price,marketplace',[d])});}
+    requireUser(user);
+    if(method!=='GET')await rateLimit(db,'write:'+user.id,100);
+    if(path==='/api/backlinks/lookup'&&method==='POST'){await rateLimit(db,'lookup:'+user.id,20,3600000);const d=await body(request,z.object({domain}));return json(await backlinkSummary(d.domain,env));}
+    const grouped=await groupApi(request,db,env,safeFetch,user);if(grouped!==undefined)return json(grouped);
+    if(path==='/api/preferences'){
+      if(method==='GET')return json(Object.fromEntries((await db.all('SELECT key,value FROM preferences WHERE user_id=?',[user.id])).map(r=>[r.key,JSON.parse(r.value)])));
+      if(method==='POST'){const d=await body(request,z.object({key:z.enum(['columns','presets','activeProject','dismissNotice']),value:z.unknown()}));if(JSON.stringify(d.value).length>20000)throw new ApiError(400,'Preference is too large.');await db.run('INSERT INTO preferences (user_id,key,value) VALUES (?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[user.id,d.key,JSON.stringify(d.value)]);return json({ok:true});}
+    }
+    if(path==='/api/decisions'){
+      const project=url.searchParams.get('project')||'';
+      if(method==='GET')return json({rows:await db.all('SELECT * FROM publisher_decisions WHERE user_id=? AND (project_id=? OR project_id=\'\')',[user.id,project])});
+      if(method==='POST'){const d=await body(request,z.object({domain,project_id:z.string().default(''),decision:z.enum(['','yes','maybe','no','blacklist']).optional(),favorite:z.boolean().optional(),notes:z.string().max(5000).optional()}));if(d.project_id)await own(db,'projects',d.project_id,user);if(d.decision==='yes'&&d.project_id)await addProjectDomains(db,d.project_id,[d.domain],limits[user.plan].domains);const old=await db.first('SELECT * FROM publisher_decisions WHERE user_id=? AND domain=? AND project_id=?',[user.id,d.domain,d.project_id]);await db.run('INSERT INTO publisher_decisions (id,user_id,domain,project_id,decision,favorite,notes) VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,domain,project_id) DO UPDATE SET decision=excluded.decision,favorite=excluded.favorite,notes=excluded.notes',[id(),user.id,d.domain,d.project_id,d.decision??old?.decision??'',d.favorite===undefined?(old?.favorite??0):Number(d.favorite),d.notes??old?.notes??'']);return json({ok:true});}
+    }
+    if(path==='/api/price-check'&&method==='POST'){
+      const data=await body(request,z.object({text:z.string().min(1).max(100000)}));const parsed=parseDomains(data.text);
+      if(!parsed.domains.length||parsed.domains.length>500)throw new ApiError(400,'Enter between 1 and 500 valid unique domains.');
+      const job=await reserve(db,user,'price-check',data.text,parsed.domains.length);
+      try{const rows=[];for(const item of parsed.domains){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[item.domain]);rows.push({...item,...p,found:!!p,gap:p&&item.quoted!==null?Math.round((item.quoted-p.price)*100)/100:null});}const result={rows,invalid:parsed.invalid,job};await finish(db,job,result);return json(result);}catch(e){await refund(db,job,'Price check failed.');throw e;}
+    }
+    if(path==='/api/export'&&method==='POST'){
+      const data=await body(request,z.object({domains:z.array(domain).min(1).max(500)}));const ds=[...new Set(data.domains)];
+      const rows=[];for(const d of ds){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[d]);if(p)rows.push(p)}
+      if(!rows.length)throw new ApiError(400,'Select publishers with available data to export.');const job=await reserve(db,user,'export',ds.join('\n'),rows.length);
+      const csv=[['Publisher','Best Price','Offers','AS','DR','Country','Traffic'].map(csvCell).join(','),...rows.map(p=>[p.domain,p.price,p.offers,p.authority,p.dr,p.country,p.traffic].map(csvCell).join(','))].join('\r\n');await finish(db,job,{rows:rows.length});return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="publishers.csv"','Cache-Control':'no-store'}});
+    }
+    if(path==='/api/projects'){
+      if(method==='GET')return json({rows:await db.all('SELECT p.*,(SELECT COUNT(*) FROM project_domains d WHERE d.project_id=p.id) AS domain_count FROM projects p WHERE user_id=? AND archived=0 ORDER BY created_at DESC',[user.id])});
+      if(method==='POST'){const d=await body(request,z.object({name:str,domain:z.string().max(253).default(''),description:z.string().max(2000).default('')}));const pid=id();const count=await db.run('INSERT INTO projects (id,user_id,name,domain,description,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM projects WHERE user_id=? AND archived=0)<?',[pid,user.id,d.name,d.domain?normalizeDomain(d.domain):'',d.description,now(),user.id,limits[user.plan].projects]);if(!count)throw new ApiError(402,'Your plan project limit has been reached.');return json({id:pid},201);}
+    }
+    const projectMatch=path.match(/^\/api\/projects\/([^/]+)(?:\/(domains))?$/);
+    if(projectMatch){const project=await own(db,'projects',projectMatch[1],user);
+      if(projectMatch[2]){
+        if(method==='GET')return json({project,rows:await db.all('SELECT * FROM project_domains WHERE project_id=? ORDER BY created_at DESC',[project.id])});
+        if(method==='POST'){const d=await body(request,z.object({text:z.string().max(100000)})),parsed=parseDomains(d.text);if(!parsed.domains.length)throw new ApiError(400,'No valid domains found.');if(parsed.domains.length>500)throw new ApiError(400,'Add up to 500 domains at a time.');await addProjectDomains(db,project.id,parsed.domains.map(x=>x.domain),limits[user.plan].domains);return json({ok:true});}
+      }else{
+        if(method==='DELETE'){await db.run('UPDATE projects SET archived=1 WHERE id=?',[project.id]);return json({ok:true});}
+        if(method==='PATCH'){const d=await body(request,z.object({name:str,description:z.string().max(2000).default('')}));await db.run('UPDATE projects SET name=?,description=? WHERE id=?',[d.name,d.description,project.id]);return json({ok:true});}
+      }
+    }
+    const domainMatch=path.match(/^\/api\/project-domains\/([^/]+)$/);
+    if(domainMatch){const row=await db.first('SELECT d.* FROM project_domains d JOIN projects p ON p.id=d.project_id WHERE d.id=? AND p.user_id=?',[domainMatch[1],user.id]);if(!row)throw new ApiError(404,'Domain not found.');if(method==='DELETE'){await db.run('DELETE FROM project_domains WHERE id=?',[row.id]);return json({ok:true});}if(method==='PATCH'){const d=await body(request,z.object({status:z.enum(['prospect','contacted','negotiating','ordered','published','rejected']),notes:z.string().max(5000)}));await db.run('UPDATE project_domains SET status=?,notes=? WHERE id=?',[d.status,d.notes,row.id]);return json({ok:true});}}
+    if(path==='/api/orders'){
+      if(method==='GET')return json({rows:await db.all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC',[user.id])});
+      if(method==='POST'){const d=await body(request,z.object({offer_id:str,content:z.string().trim().min(20).max(100000),target_url:publicUrl,anchor:str}));const offer=await db.first('SELECT * FROM offers WHERE id=? AND active=1',[d.offer_id]);if(!offer)throw new ApiError(404,'Offer is no longer available.');const oid=id();await db.run('INSERT INTO orders (id,user_id,offer_id,domain,marketplace,price,content,target_url,anchor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[oid,user.id,offer.id,offer.domain,offer.marketplace,offer.price,d.content,d.target_url,d.anchor,now()]);return json({id:oid},201);}
+    }
+    const orderMatch=path.match(/^\/api\/orders\/([^/]+)(?:\/(checkout))?$/);
+    if(orderMatch){const order=await own(db,'orders',orderMatch[1],user);
+      if(orderMatch[2]&&method==='POST'){if(order.status!=='draft')throw new ApiError(409,'Only a draft order can be paid.');const session=await checkout(env,{mode:'payment',client_reference_id:user.id,'metadata[order_id]':order.id,'line_items[0][price_data][currency]':'usd','line_items[0][price_data][unit_amount]':String(Math.round(order.price*100)),'line_items[0][price_data][product_data][name]':`Publisher placement: ${order.domain}`,'line_items[0][quantity]':'1',success_url:`${env.APP_ORIGIN||url.origin}/my-orders/?payment=success`,cancel_url:`${env.APP_ORIGIN||url.origin}/my-orders/`});await db.run('UPDATE orders SET stripe_session=? WHERE id=?',[session.id,order.id]);return json({url:session.url});}
+      if(method==='DELETE'){if(order.status!=='draft')throw new ApiError(409,'Paid orders require a support request to cancel.');await db.run("UPDATE orders SET status='cancelled' WHERE id=? AND status='draft'",[order.id]);return json({ok:true});}
+    }
+    if(path==='/api/requests'){
+      if(method==='GET')return json({rows:await db.all('SELECT r.*,(SELECT body FROM messages m WHERE m.request_id=r.id ORDER BY created_at LIMIT 1) AS preview FROM support_requests r WHERE user_id=? ORDER BY created_at DESC',[user.id])});
+      if(method==='POST'){const d=await body(request,z.object({subject:str,message:z.string().trim().min(1).max(10000)}));const rid=id();await db.batch([{sql:'INSERT INTO support_requests (id,user_id,subject,created_at) VALUES (?,?,?,?)',args:[rid,user.id,d.subject,now()]},{sql:'INSERT INTO messages VALUES (?,?,?,?,?)',args:[id(),rid,user.id,d.message,now()]}]);return json({id:rid},201);}
+    }
+    if(path==='/api/quotes'){
+      if(method==='GET')return json({rows:await db.all('SELECT * FROM quote_requests WHERE user_id=? ORDER BY created_at DESC',[user.id])});
+      if(method==='POST'){if(user.plan==='start')throw new ApiError(402,'Requests are part of paid plans.');const d=await body(request,z.object({domain,link_type:z.enum(['Guest Post','Link Insertion']),niche:z.string().max(100).default('General'),message:z.string().max(5000).default('Please check availability and price.')}));const qid=id(),rid=id();await db.batch([{sql:'INSERT INTO support_requests (id,user_id,subject,created_at) VALUES (?,?,?,?)',args:[rid,user.id,'Publisher request: '+d.domain,now()]},{sql:'INSERT INTO messages VALUES (?,?,?,?,?)',args:[id(),rid,user.id,d.message||'Please check availability and price.',now()]},{sql:'INSERT INTO quote_requests (id,user_id,domain,link_type,niche,request_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',args:[qid,user.id,d.domain,d.link_type,d.niche,rid,now(),now()]}]);return json({id:qid},201);}
+    }
+    const requestMatch=path.match(/^\/api\/requests\/([^/]+)$/);
+    if(requestMatch){const r=await own(db,'support_requests',requestMatch[1],user);if(method==='GET')return json({request:r,messages:await db.all('SELECT m.*,u.name FROM messages m JOIN users u ON u.id=m.user_id WHERE request_id=? ORDER BY created_at',[r.id])});if(method==='POST'){const d=await body(request,z.object({message:z.string().trim().min(1).max(10000)}));await db.run('INSERT INTO messages VALUES (?,?,?,?,?)',[id(),r.id,user.id,d.message,now()]);return json({ok:true});}if(method==='PATCH'){const d=await body(request,z.object({status:z.enum(['open','closed'])}));await db.run('UPDATE support_requests SET status=? WHERE id=?',[d.status,r.id]);return json({ok:true});}}
+    if(path==='/api/monitors'){
+      if(method==='GET')return json({rows:await db.all('SELECT * FROM monitors WHERE user_id=? ORDER BY created_at DESC',[user.id])});
+      if(method==='POST'){const d=await body(request,z.object({urls:z.array(publicUrl).min(1).max(100),target:domain}));await db.batch([...new Set(d.urls)].map(source=>({sql:'INSERT OR IGNORE INTO monitors (id,user_id,source_url,target_domain,created_at) VALUES (?,?,?,?,?)',args:[id(),user.id,source,d.target,now()]})));return json({ok:true},201);}
+    }
+    const monitorMatch=path.match(/^\/api\/monitors\/([^/]+)(?:\/(check|history))?$/);
+    if(monitorMatch){const monitor=await own(db,'monitors',monitorMatch[1],user);
+      if(method==='DELETE'){await db.batch([{sql:'DELETE FROM monitor_checks WHERE monitor_id=?',args:[monitor.id]},{sql:'DELETE FROM monitors WHERE id=? AND user_id=?',args:[monitor.id,user.id]}]);return json({ok:true});}
+      if(monitorMatch[2]==='history'&&method==='GET')return json({rows:await db.all('SELECT * FROM monitor_checks WHERE monitor_id=? ORDER BY created_at DESC',[monitor.id])});
+      if(monitorMatch[2]==='check'&&method==='POST'){
+        const job=await reserve(db,user,'monitor',monitor.source_url,1);
+        try{const result=await inspectBacklink(monitor.source_url,monitor.target_domain,safeFetch);await db.batch([{sql:'UPDATE monitors SET status=?,anchor=?,rel=?,http_status=?,error=?,last_checked=? WHERE id=?',args:[result.status,result.anchor,result.rel,result.http_status,result.error,now(),monitor.id]},{sql:'INSERT INTO monitor_checks (id,monitor_id,status,previous_status,anchor,rel,http_status,error,created_at) VALUES (?,?,?,?,?,?,?,?,?)',args:[id(),monitor.id,result.status,monitor.status,result.anchor,result.rel,result.http_status,result.error,now()]}]);await finish(db,job,result);return json(result);}catch(e){await refund(db,job,'Unable to check source page.');throw e;}
+      }
+    }
+    if(path==='/api/scans'&&method==='GET')return json({rows:await db.all('SELECT j.*,s.country,s.language,s.targets,s.project_id,s.model FROM jobs j LEFT JOIN scan_details s ON s.job_id=j.id WHERE user_id=? ORDER BY created_at DESC LIMIT 50',[user.id])});
+    if(path==='/api/scans'&&method==='POST'){
+      const d=await body(request,z.object({kind:z.enum(['google','backlinks','ai']),query:str,country:z.enum(['United States','United Kingdom','India','Canada','Australia','Germany']).default('United States'),language:z.enum(['en','hi','fr','de','es']).default('en'),depth:z.number().int().min(10).max(200).default(100),project_id:z.string().default(''),targets:z.array(domain).max(100).default([])}));
+      if(!providerStatus(env)[d.kind])throw new ApiError(503,'This scanner is not connected. Ask the administrator to configure the provider.','provider_unavailable');
+      if(d.kind==='backlinks'&&!normalizeDomain(d.query))throw new ApiError(400,'Enter a valid competitor domain.');
+      if(d.project_id)await own(db,'projects',d.project_id,user);
+      const cost=d.kind==='ai'?10:d.kind==='google'?Math.ceil(d.depth/10):d.depth;
+      const job=await reserve(db,user,d.kind,d.query,cost);
+      try{await db.run('INSERT INTO scan_details (job_id,country,language,project_id,targets,model) VALUES (?,?,?,?,?,?)',[job,d.country,d.language,d.project_id||null,JSON.stringify(d.targets),d.kind==='ai'?'Perplexity Agent':'']);const result=await scanProvider(d.kind,d.query,d.country,d.depth,env,d.language);const rows=[];for(const row of result.rows){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[row.domain]);rows.push({...row,...p,found:!!p,target:d.targets.includes(row.domain)});}const data={...result,rows,job};await finish(db,job,data,d.kind==='backlinks'?Math.max(0,cost-rows.length):0);return json(data);}catch(e){await refund(db,job,'Provider could not complete the scan.');throw e;}
+    }
+    if(path==='/api/usage'&&method==='GET')return json({user:safeUser(user),rows:await db.all('SELECT * FROM ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[user.id])});
+    if(path==='/api/billing/checkout'&&method==='POST'){const d=await body(request,z.object({plan:z.enum(['pro','advanced'])}));const price=d.plan==='pro'?env.STRIPE_PRO_PRICE_ID:env.STRIPE_ADVANCED_PRICE_ID;if(!price)throw new ApiError(503,'This plan is not connected to billing yet.');const session=await checkout(env,{mode:'subscription',client_reference_id:user.id,'metadata[user_id]':user.id,'subscription_data[metadata][user_id]':user.id,'line_items[0][price]':price,'line_items[0][quantity]':'1',customer_email:user.email,success_url:`${env.APP_ORIGIN||url.origin}/pricing/?checkout=success`,cancel_url:`${env.APP_ORIGIN||url.origin}/pricing/`});return json({url:session.url});}
+    if(path.startsWith('/api/admin/')){
+      admin(user);
+      if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n});
+      if(path==='/api/admin/inventory'&&method==='POST'){
+        const data=await body(request,z.object({rows:z.array(z.object({domain,marketplace:str,price:z.coerce.number().min(0).max(1000000),type:z.enum(['Guest Post','Link Insertion']).default('Guest Post'),title:z.string().max(500).default(''),category:z.string().max(100).default(''),country:z.string().max(100).default(''),language:z.string().max(100).default('English'),authority:z.coerce.number().int().min(0).max(100).nullable().default(null),dr:z.coerce.number().int().min(0).max(100).nullable().default(null),traffic:z.coerce.number().int().min(0).nullable().default(null),referring_domains:z.coerce.number().int().min(0).nullable().default(null),traffic_top:z.coerce.number().int().min(0).nullable().default(null),all_traffic_top:z.coerce.number().int().min(0).nullable().default(null),all_traffic:z.coerce.number().int().min(0).nullable().default(null),monthly_min:z.coerce.number().int().min(0).nullable().default(null),follow:z.enum(['dofollow','nofollow']).default('dofollow'),sponsored:z.coerce.number().min(0).max(1).default(0),restricted:z.coerce.number().min(0).max(1).default(0),url:z.union([publicUrl,z.literal('')]).default(''),metrics_source:z.string().max(100).default('Imported')})).min(1).max(250)}));
+        // Validate the entire upload before executing one atomic batch. Never seed invented prices.
+        const statements:Statement[]=[];for(const p of data.rows){statements.push({sql:'INSERT INTO publishers (domain,title,category,language,country,authority,dr,traffic,referring_domains,traffic_top,all_traffic_top,all_traffic,monthly_min,updated_at,metrics_source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(domain) DO UPDATE SET title=excluded.title,category=excluded.category,language=excluded.language,country=excluded.country,authority=excluded.authority,dr=excluded.dr,traffic=excluded.traffic,referring_domains=excluded.referring_domains,traffic_top=excluded.traffic_top,all_traffic_top=excluded.all_traffic_top,all_traffic=excluded.all_traffic,monthly_min=excluded.monthly_min,updated_at=excluded.updated_at,metrics_source=excluded.metrics_source',args:[p.domain,p.title,p.category,p.language,p.country,p.authority,p.dr,p.traffic,p.referring_domains,p.traffic_top,p.all_traffic_top,p.all_traffic,p.monthly_min,now(),p.metrics_source]},{sql:'INSERT INTO offers (id,domain,marketplace,price,type,follow,sponsored,restricted,url,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(domain,marketplace,type) DO UPDATE SET price=excluded.price,follow=excluded.follow,sponsored=excluded.sponsored,restricted=excluded.restricted,url=excluded.url,active=1,updated_at=excluded.updated_at',args:[id(),p.domain,p.marketplace,p.price,p.type,p.follow,p.sponsored,p.restricted,p.url,now()]})}await db.batch(statements);return json({imported:data.rows.length});
+      }
+      if(path==='/api/admin/orders'&&method==='GET')return json({rows:await db.all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC')});
+      if(path==='/api/admin/quotes'&&method==='GET')return json({rows:await db.all('SELECT q.*,u.email FROM quote_requests q JOIN users u ON u.id=q.user_id ORDER BY q.created_at DESC')});
+      const quoteMatch=path.match(/^\/api\/admin\/quotes\/([^/]+)$/);if(quoteMatch&&method==='PATCH'){const d=await body(request,z.object({status:z.enum(['pending','checking','quoted','unavailable']),price:z.number().min(0).max(1000000).nullable()}));if(d.status==='quoted'&&d.price===null)throw new ApiError(400,'A price is required for a quote.');if(!await db.run('UPDATE quote_requests SET status=?,price=?,updated_at=? WHERE id=?',[d.status,d.price,now(),quoteMatch[1]]))throw new ApiError(404,'Request not found.');return json({ok:true});}
+      if(path==='/api/admin/requests'&&method==='GET')return json({rows:await db.all('SELECT r.*,u.email FROM support_requests r JOIN users u ON u.id=r.user_id ORDER BY r.created_at DESC')});
+      const supportMatch=path.match(/^\/api\/admin\/requests\/([^/]+)$/);if(supportMatch){if(method==='GET')return json({messages:await db.all('SELECT m.*,u.name FROM messages m JOIN users u ON u.id=m.user_id WHERE request_id=? ORDER BY created_at',[supportMatch[1]])});if(method==='POST'){const d=await body(request,z.object({message:z.string().min(1).max(10000)}));if(!await db.first('SELECT id FROM support_requests WHERE id=?',[supportMatch[1]]))throw new ApiError(404,'Request not found.');await db.run('INSERT INTO messages VALUES (?,?,?,?,?)',[id(),supportMatch[1],user.id,d.message,now()]);return json({ok:true});}}
+      const updateOrder=path.match(/^\/api\/admin\/orders\/([^/]+)$/);if(updateOrder&&method==='PATCH'){const d=await body(request,z.object({status:z.enum(['in_progress','published']),placement_url:z.union([publicUrl,z.literal('')]).default('')}));const order=await db.first('SELECT * FROM orders WHERE id=?',[updateOrder[1]]);if(!order||!['paid','in_progress'].includes(order.status))throw new ApiError(409,'Only paid orders can enter fulfillment.');if(d.status==='published'&&!d.placement_url)throw new ApiError(400,'A published placement URL is required.');await db.run('UPDATE orders SET status=?,placement_url=? WHERE id=?',[d.status,d.placement_url,order.id]);return json({ok:true});}
+    }
+    throw new ApiError(404,'API route not found.');
+  }catch(error){if(error instanceof ApiError)return json({error:error.message,code:error.code},error.status);console.error('API failure',error instanceof Error?error.message:'Unknown error');return json({error:'The server could not complete this request. Please try again.'},500);}
+}
+
