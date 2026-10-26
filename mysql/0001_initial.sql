@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS `preferences` (
 	`user_id` VARCHAR(191) NOT NULL,
 	`key` VARCHAR(191) NOT NULL,
 	`value` LONGTEXT NOT NULL,
- UNIQUE KEY `preferences_unique` (`user_id`,`key`),
+ PRIMARY KEY (`user_id`,`key`),
 FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 --> statement-breakpoint
