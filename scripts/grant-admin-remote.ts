@@ -1,4 +1,4 @@
-import {getRemoteDatabase} from '../server/remote-db';
+import {getMySQLDatabase as getRemoteDatabase} from '../server/mysql-db';
 try{process.loadEnvFile('.env.local')}catch{}
 async function main(){
  const email=process.argv[2]?.toLowerCase();if(!email||!email.includes('@'))throw new Error('Usage: npm run admin:grant:remote -- existing-account@example.com');

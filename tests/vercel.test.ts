@@ -6,7 +6,7 @@ import {vercelApi} from '../server/vercel-api';
 import {api} from '../server/api';
 
 test('Vercel reports missing persistent storage without pretending the database is healthy',async()=>{
- const session=await vercelApi(new Request('https://app.example/api/session'),{});assert.equal(session.status,200);const value=await session.json();assert.equal(value.databaseConfigured,false);assert.equal(value.user,null);assert.equal(value.providers.scheduling,false);assert.match(value.setupRequired,/TURSO_DATABASE_URL/);
+ const session=await vercelApi(new Request('https://app.example/api/session'),{});assert.equal(session.status,200);const value=await session.json();assert.equal(value.databaseConfigured,false);assert.equal(value.user,null);assert.equal(value.providers.scheduling,false);assert.match(value.setupRequired,/MYSQL_URL/);
  const health=await vercelApi(new Request('https://app.example/api/health'),{});assert.equal(health.status,503);assert.equal((await health.json()).code,'database_not_configured');
  const register=await vercelApi(new Request('https://app.example/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),{});assert.equal(register.status,503);
 });

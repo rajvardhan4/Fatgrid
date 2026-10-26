@@ -1,46 +1,40 @@
-# Vercel deployment
+# MySQL deployment on Vercel
 
-The old deployment exported only HTML. The API was implemented in a separate local Node server and a Cloudflare Worker, neither of which Vercel starts automatically. `/api/session` therefore returned a 404 HTML page, producing the misleading local-start message.
+The Vercel backend now uses MySQL 8.0.16 or newer. Existing SQLite/D1 Sites data and local files are not automatically copied. The frontend and existing workflows stay the same.
 
-This version includes a Next.js serverless API at `pages/api/[...path].ts`. `vercel.json` selects the Next.js preset, runs `npm run build:vercel`, and uses `.next` output instead of the static `out` directory. Existing SQLite-compatible queries are backed by a remote libSQL database on Vercel. Local development still uses its local SQLite database, and the separate Sites build still uses Cloudflare D1.
+1. Create a cloud MySQL database and database user. Use a provider endpoint reachable from Vercel with TLS enabled.
+2. In Vercel > Project > Settings > Environment Variables, set Production:
+   - MYSQL_URL: mysql://USER:PASSWORD@HOST:PORT/DATABASE (use the actual provider values; percent-encode special characters in username/password).
+   - APP_ORIGIN: https://fatgrid-ebon.vercel.app
+   - MYSQL_SSL_CA: optional provider CA PEM certificate, when required. TLS certificate verification is enabled; do not disable it in production.
+3. Remove obsolete TURSO_DATABASE_URL/TURSO_AUTH_TOKEN values to avoid confusion. Save and redeploy.
+4. The API creates the schema on its first connection. The database user needs CREATE and index/foreign-key privileges as well as SELECT, INSERT, UPDATE and DELETE. MySQL DDL is restart-safe and migrations are serialized by a database advisory lock.
+5. Check /api/health: only HTTP 200 confirms database connectivity. Register your account on the live site.
 
-## Required database setup
+## Administrator portal
 
-1. Create a **libSQL-compatible database** with Turso. Choose the libSQL engine for this adapter; Turso's newer engine uses a different driver.
-2. In Vercel → the Fatgrid project → Settings → Environment Variables, add these for Production (and Preview if desired):
-   - `TURSO_DATABASE_URL`: the database's `libsql://…` or HTTPS URL.
-   - `TURSO_AUTH_TOKEN`: its database-scoped read/write token. Mark it sensitive. Never use a `NEXT_PUBLIC_` prefix.
-   - `APP_ORIGIN`: `https://fatgrid-ebon.vercel.app` (no trailing slash). Alternatively omit it and use the request origin.
-3. Redeploy the latest `main` commit. The first backend request applies the bundled, versioned schema migrations. Local data and the private Site's D1 data are **not** automatically copied into this database.
-4. Open `/api/health`: expect HTTP 200 and `{"ok":true,"database":"connected"}`. Register an account and create a project; reload to confirm persistence.
+Users cannot choose an admin role during registration. To grant your existing account admin access, place MYSQL_URL and any required MYSQL_SSL_CA in the ignored .env.local file, then run:
 
-Aliases `LIBSQL_DATABASE_URL` and `LIBSQL_AUTH_TOKEN` are also accepted. Local disk paths and `/tmp` are intentionally not used as a production database because function instances must share durable data.
+    npm run admin:grant:remote -- your-existing-email@example.com
 
-Before a database is configured, the public UI still loads and `/api/session` returns an explicit `databaseConfigured:false` setup state. `/api/health` and storage-dependent operations correctly return HTTP 503. This is **not** a successful database connection; login/data saving require step 2.
+Reopen /admin/. The Users tab supports name/email search, pagination, account details, projects, orders, requests, scans, unit history, monitoring, saved publishers and quotes. Detail categories show up to 100 records. Password hashes and session tokens are not returned. API authorization is enforced independently of the frontend.
 
-## Deployment settings
+## Build and database operations
 
-- Repository: `rajvardhan4/Fatgrid`, production branch `main`.
-- Framework: Next.js.
-- Node.js: 24.x (pinned in package.json; the crawler dependency requires modern Node).
-- Root directory: repository root.
-- Build: `npm run build:vercel` (also selected by committed `vercel.json`).
-- Output: `.next`; remove any previous `out` or `dist` override.
-- Keep provider secrets server-side. Search and payments still require their separate credentials documented in README.
-- Do not set `PRIVATE_SCHEDULER` on Vercel. The Vercel adapter ignores Cloudflare identity headers and that private-Site bypass setting.
+Vercel framework: Next.js; build: npm run build:vercel; output: .next; Node: 24.x. Do not use static export/out for Vercel.
 
-If Git integration does not trigger automatically, redeploy the latest commit from Vercel's Deployments page. A Git push alone does not prove that a Vercel deployment succeeded.
+    npm run db:migrate:remote
 
-## Administration and migrations
+Local development defaults to SQLite. To use MySQL locally, set MYSQL_URL in .env.local. MYSQL_SSL=false is supported only for localhost development.
 
-To manage inventory, register your own account on the Vercel app first. Configure the same remote DB credentials in your ignored local `.env.local`, then run:
+The separate owner-private Sites deployment continues to use its existing D1 worker. External SEO/search/billing providers still require their own credentials. Connecting MySQL does not activate those services. Scheduling requires CRON_SECRET plus a scheduler that sends authenticated POST requests to the existing cron endpoint.
 
-```powershell
-npm run admin:grant:remote -- your-account@example.com
-```
+Do not commit .env files, database passwords or tokens. .env.vercel is a local ignored template and must be filled before import.
 
-This terminal-only command updates an existing remote account. Self-reported email addresses during public registration never grant admin privileges. To run schema migrations separately, use `npm run db:migrate:remote`.
+## If you do not have hosting yet
 
-Optional scheduled processing requires a server scheduler that sends authenticated POST requests to `/api/internal/tick`, with the configured `CRON_SECRET` in `Authorization: Bearer …`. Vercel functions do not run the local server's interval timer. Interactive monitor checks continue through the authenticated process endpoint while the page is open.
+Aiven offers a free MySQL tier: https://aiven.io/docs/products/mysql/concepts/mysql-free-tier . Create a MySQL service in https://console.aiven.io/ and wait until it is running. Copy its Service URI into MYSQL_URL. Download the project's CA certificate and paste its complete PEM contents into MYSQL_SSL_CA. Save both as Vercel environment variables and redeploy. Never paste the URI or password into chat.
 
-Reference: [Turso with Vercel](https://docs.turso.tech/integrations/vercel), [Next.js API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes).
+Free plans have capacity limits and may be powered off after inactivity. Review the provider's current terms before using them for production.
+
+Run the shared integration suite against an isolated local MySQL server by setting MYSQL_TEST_URL and running npm test. Test fixtures create and remove uniquely named fg_test_* databases; use a test-only account with CREATE/DROP DATABASE privileges.

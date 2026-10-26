@@ -193,6 +193,23 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     if(path==='/api/billing/checkout'&&method==='POST'){const d=await body(request,z.object({plan:z.enum(['pro','advanced'])}));const price=d.plan==='pro'?env.STRIPE_PRO_PRICE_ID:env.STRIPE_ADVANCED_PRICE_ID;if(!price)throw new ApiError(503,'This plan is not connected to billing yet.');const session=await checkout(env,{mode:'subscription',client_reference_id:user.id,'metadata[user_id]':user.id,'subscription_data[metadata][user_id]':user.id,'line_items[0][price]':price,'line_items[0][quantity]':'1',customer_email:user.email,success_url:`${env.APP_ORIGIN||url.origin}/pricing/?checkout=success`,cancel_url:`${env.APP_ORIGIN||url.origin}/pricing/`});return json({url:session.url});}
     if(path.startsWith('/api/admin/')){
       admin(user);
+      if(path==='/api/admin/users'&&method==='GET'){
+        const search=(url.searchParams.get('search')||'').slice(0,254),page=Math.max(1,Math.min(100000,Number(url.searchParams.get('page'))||1));
+        const filter=' WHERE email LIKE ? OR name LIKE ?',args=['%'+search+'%','%'+search+'%'];
+        return json({rows:await db.all('SELECT id,email,name,role,plan,units,created_at FROM users'+filter+' ORDER BY created_at DESC LIMIT 50 OFFSET ?', [...args,(page-1)*50]),total:(await db.first('SELECT COUNT(*) AS n FROM users'+filter,args))!.n,page});
+      }
+      const adminUser=path.match(/^\/api\/admin\/users\/([^/]+)$/);
+      if(adminUser&&method==='GET'){
+        const uid=adminUser[1],account=await db.first('SELECT id,email,name,role,plan,units,created_at FROM users WHERE id=?',[uid]);
+        if(!account)throw new ApiError(404,'User not found.');
+        const collections:Record<string,Row[]>={};
+        for(const table of ['projects','orders','support_requests','jobs','ledger','monitors','monitor_groups','publisher_decisions','quote_requests'])collections[table]=await db.all(`SELECT * FROM ${table} WHERE user_id=? LIMIT 100`,[uid]);
+        collections.project_domains=await db.all('SELECT d.* FROM project_domains d JOIN projects p ON p.id=d.project_id WHERE p.user_id=? LIMIT 100',[uid]);
+        collections.messages=await db.all('SELECT m.* FROM messages m JOIN support_requests r ON r.id=m.request_id WHERE r.user_id=? ORDER BY m.created_at DESC LIMIT 100',[uid]);
+        collections.monitor_checks=await db.all('SELECT c.* FROM monitor_checks c JOIN monitors m ON m.id=c.monitor_id WHERE m.user_id=? ORDER BY c.created_at DESC LIMIT 100',[uid]);
+        collections.monitor_group_history=await db.all('SELECT h.* FROM monitor_group_history h JOIN monitor_groups g ON g.id=h.group_id WHERE g.user_id=? ORDER BY h.created_at DESC LIMIT 100',[uid]);
+        return json({account,collections});
+      }
       if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n});
       if(path==='/api/admin/inventory'&&method==='POST'){
         const data=await body(request,z.object({rows:z.array(z.object({domain,marketplace:str,price:z.coerce.number().min(0).max(1000000),type:z.enum(['Guest Post','Link Insertion']).default('Guest Post'),title:z.string().max(500).default(''),category:z.string().max(100).default(''),country:z.string().max(100).default(''),language:z.string().max(100).default('English'),authority:z.coerce.number().int().min(0).max(100).nullable().default(null),dr:z.coerce.number().int().min(0).max(100).nullable().default(null),traffic:z.coerce.number().int().min(0).nullable().default(null),referring_domains:z.coerce.number().int().min(0).nullable().default(null),traffic_top:z.coerce.number().int().min(0).nullable().default(null),all_traffic_top:z.coerce.number().int().min(0).nullable().default(null),all_traffic:z.coerce.number().int().min(0).nullable().default(null),monthly_min:z.coerce.number().int().min(0).nullable().default(null),follow:z.enum(['dofollow','nofollow']).default('dofollow'),sponsored:z.coerce.number().min(0).max(1).default(0),restricted:z.coerce.number().min(0).max(1).default(0),url:z.union([publicUrl,z.literal('')]).default(''),metrics_source:z.string().max(100).default('Imported')})).min(1).max(250)}));

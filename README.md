@@ -17,7 +17,7 @@ The backend is not localStorage. Accounts, projects, domains, notes, filters, fa
 
 ## Vercel deployment
 
-See [VERCEL.md](VERCEL.md) for the serverless API and persistent database setup. Vercel uses `npm run build:vercel`; `npm run build` auto-selects that target when `VERCEL=1`. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` before expecting authentication or saved records to work. The old static-only Vercel deployment did not include `/api/*`.
+See [VERCEL.md](VERCEL.md) for the serverless API and persistent database setup. Vercel uses `npm run build:vercel`; `npm run build` auto-selects that target when `VERCEL=1`. Set `MYSQL_URL` before expecting authentication or saved records to work. The old static-only Vercel deployment did not include `/api/*`.
 
 ## Start locally
 

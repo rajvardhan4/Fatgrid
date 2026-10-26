@@ -2,11 +2,13 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { openDatabase } from './local-db';
+import {getMySQLDatabase} from './mysql-db';
 import { api, recoverStaleJobs } from './api';
 import {processGroups} from './monitoring';
 import {safeNodeFetch as safeFetch} from './node-fetch';
 try{process.loadEnvFile('.env.local')}catch{}
-const db=openDatabase(),port=Number(process.env.API_PORT||3001);
+async function main(){
+const db=process.env.MYSQL_URL?await getMySQLDatabase(process.env):openDatabase(),port=Number(process.env.API_PORT||3001);
 const env={...process.env,AUTH_MODE:'local' as const,APP_ORIGIN:process.env.APP_ORIGIN||'http://localhost:3000'};
 const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.png':'image/png','.svg':'image/svg+xml','.txt':'text/plain','.json':'application/json'};
 createServer(async(req,res)=>{
@@ -31,3 +33,6 @@ createServer(async(req,res)=>{
 recoverStaleJobs(db).catch(console.error);
 let ticking=false; setInterval(async()=>{if(ticking)return;ticking=true;try{await processGroups(db,env,safeFetch);await recoverStaleJobs(db)}catch(e){console.error(e)}finally{ticking=false}},30000).unref();
 
+
+}
+main().catch(()=>{console.error("Backend initialization failed. Check database configuration.");process.exitCode=1});
