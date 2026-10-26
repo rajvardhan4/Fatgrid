@@ -4,13 +4,17 @@
   "private": true,
   "scripts": {
     "dev": "concurrently --kill-others \"tsx watch server/local.ts\" \"next dev --hostname 127.0.0.1\"",
-    "build": "next build && node scripts/build-worker.mjs",
+    "build": "node scripts/build.mjs",
     "start": "tsx server/local.ts",
     "db:generate": "drizzle-kit generate",
     "test": "tsx --test tests/*.test.ts",
-    "admin:grant": "tsx scripts/grant-admin.ts"
+    "admin:grant": "tsx scripts/grant-admin.ts",
+    "build:vercel": "node scripts/build.mjs --vercel",
+    "db:migrate:remote": "tsx scripts/migrate-remote.ts",
+    "admin:grant:remote": "tsx scripts/grant-admin-remote.ts"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "cheerio": "^1.2.0",
     "lucide-react": "^0.468.0",
     "next": "^15.5.0",
@@ -33,5 +37,8 @@
   "overrides": {
     "postcss": "^8.5.23",
     "esbuild": "$esbuild"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

@@ -10,7 +10,7 @@ export default function Dashboard({route}:{route:string}){
  const [presets,setPresets]=useState<Row[]>([]),[decisions,setDecisions]=useState<Row[]>([]),[selectedProject,setSelectedProject]=useState(''),[noticeDismissed,setNoticeDismissed]=useState(false);
  const user=session.user,generation=useRef(0),timer=useRef<ReturnType<typeof setTimeout>|null>(null);
  const notify=(message:string)=>{setToast(message);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>setToast(''),5000)};
- const refreshSession=useCallback(async()=>{try{setSession({...await request('/session'),loading:false})}catch{setSession({user:null,providers:{},loading:false});setError('Backend unavailable. Start the frontend and backend with npm run dev.')}},[]);
+ const refreshSession=useCallback(async()=>{try{const data=await request('/session');setSession({...data,loading:false});if(data.setupRequired)setError(data.setupRequired)}catch(e){setSession({user:null,providers:{},loading:false});setError(e instanceof Error?e.message:'Unable to reach the backend. Please retry.')}},[]);
  useEffect(()=>{refreshSession();return()=>{if(timer.current)clearTimeout(timer.current)}},[refreshSession]);
  async function loadPage(){const gen=++generation.current;setError('');try{
  if(route==='/inventory'){const q=new URLSearchParams(Object.entries(filters).filter(([,v])=>v!==''&&v!==undefined).map(([k,v])=>[k,String(v)]));const data=await request('/inventory?'+q);if(gen===generation.current){setRows(data.rows);setTotal(data.total)}return;}

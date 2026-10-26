@@ -2,7 +2,7 @@
 import {createContext,useContext,useEffect,useRef,useState,type FormEvent} from 'react';
 import {AlertCircle,ArrowUpRight,ArrowUpDown,Folder,Star,Check,HelpCircle,X,Ban,Copy,StickyNote} from 'lucide-react';
 export type Row=Record<string,any>;
-export async function request(path:string,options:RequestInit={}){const r=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json',...options.headers},credentials:'same-origin'});const d=await r.json();if(!r.ok)throw new Error(d.error||'Unable to complete request');return d;}
+export async function request(path:string,options:RequestInit={}){const r=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json',...options.headers},credentials:'same-origin'});if(!r.headers.get('content-type')?.includes('application/json'))throw new Error(r.status===404?'API route not deployed. Redeploy this project with the Next.js framework preset.':'The backend returned an invalid response. Check deployment logs.');const d=await r.json();if(!r.ok)throw new Error(d.error||'Unable to complete request');return d;}
 export const post=(path:string,data:unknown,method='POST')=>request(path,{method,body:JSON.stringify(data)});
 export const money=(v:any)=>v==null?'—':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(v));
 export const date=(v:string)=>v?new Date(v).toLocaleString():'—';
