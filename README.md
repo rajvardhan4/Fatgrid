@@ -61,6 +61,9 @@ npm start
 | Messages/support | User-owned conversations and replies, administrator inbox. |
 | Administration | Validated atomic inventory CSV import, integration status, orders, quotes and support handling. |
 | Account/credits | Hashed passwords and session tokens locally, platform identity hosted, account isolation, atomic unit reservations, refunds, usage history and free-plan monthly reset. Paid quotas refresh only from verified paid invoices. |
+| Account security | Password change in Account settings (signs out other devices), email password reset with single-use 1-hour links, optional Google sign-in (verified email only; a Google account can set a password later). |
+| Shared projects | Owners invite registered users as viewers (read only) or editors (add/update domains, "Yes" decisions); members see shared projects with their role and can leave. Only the owner renames, archives or manages members. Domain limits follow the owner's plan. |
+| Email alerts | When a monitored link that was live in the previous run stops being live (missing, nofollow, page unreachable), the owner gets one email per run. Users can turn alerts off in Account settings. |
 
 ## Connect real data
 
@@ -74,6 +77,9 @@ Set secrets in `.env.local` locally, or the private Site's runtime environment. 
 | `PERPLEXITY_API_KEY` | AI citations via the Perplexity Agent endpoint. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Checkout and payment verification. |
 | `STRIPE_PRO_PRICE_ID`, `STRIPE_ADVANCED_PRICE_ID` | Configured subscription products. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Password reset emails and backlink alerts (Resend). `EMAIL_FROM` must use a domain verified in Resend. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | "Log in with Google". Add `<APP_ORIGIN>/api/auth/google/callback/` as an authorized redirect URI in Google Cloud. |
+| `CRON_SECRET` | Scheduled monitoring. On Vercel the bundled daily cron calls the tick endpoint with this secret. |
 
 Without credentials, affected operations report **not connected** and do not spend units or fabricate results. Live provider calls were not tested against paid accounts. Automated tests use explicitly isolated fixtures.
 
@@ -83,20 +89,20 @@ Stripe webhook route is `/api/billing/webhook`. Configure `checkout.session.comp
 
 The local server processes pending checks every 30 seconds while it runs. Group progress is checkpointed in SQL; opening the monitor page also advances pending checks. Every scheduled cycle charges the account and stops on insufficient units.
 
-Hosted unattended updates use the parameter-free `/api/internal/tick` endpoint. In the owner-private Sites deployment, `PRIVATE_SCHEDULER=1` uses the platform's authenticated service boundary. The linked updater obtains fresh Site service access; credentials are never stored in its prompt. Do not retain this mode when changing the Site to public. For an independently hosted/public deployment, set `CRON_SECRET` and have your scheduler send `Authorization: Bearer <CRON_SECRET>` to this endpoint. User-owned interactive routes always require user identity.
+Hosted unattended updates use the parameter-free `/api/internal/tick` endpoint. In the owner-private Sites deployment, `PRIVATE_SCHEDULER=1` uses the platform's authenticated service boundary. The linked updater obtains fresh Site service access; credentials are never stored in its prompt. Do not retain this mode when changing the Site to public. For an independently hosted/public deployment, set `CRON_SECRET` and have your scheduler send `Authorization: Bearer <CRON_SECRET>` to this endpoint (GET or POST). On Vercel, `vercel.json` already defines a daily Vercel Cron (06:00 UTC) for it; each call keeps crawling for up to 40 seconds. The Hobby plan runs crons once a day, so daily and weekly schedules are both honoured. User-owned interactive routes always require user identity.
 
 ## Boundaries still different from the original
 
 - The app reproduces inspected screens and core flows; it is not a certified pixel-perfect copy of every paid/private state.
 - Marketplace prices and SEO metrics come from your imported/licensed data. Automatic refresh of Semrush/Ahrefs metrics and original marketplace feeds is not implemented.
-- Google OAuth sign-in, Google Sheets OAuth export, email delivery/password recovery, shared project membership, competitor/relevance scoring and original outreach/contact enrichment are not implemented. Their absent capabilities are not simulated as success.
+- Google Sheets OAuth export, competitor/relevance scoring and original outreach/contact enrichment are not implemented. Google sign-in, password recovery email and backlink alert email work only after their credentials are configured; without them the app says so instead of pretending to succeed.
 - AI Search currently offers Perplexity Agent, not the original model catalog. Some provider-specific result columns remain blank when no imported value exists.
-- In-app monitoring updates and history work; outbound email alerts and purchasing directly from third-party marketplaces require additional integrations/agreements. Admin fulfillment is manual.
+- In-app monitoring updates, history and email alerts work; purchasing directly from third-party marketplaces requires additional agreements. Admin fulfillment is manual.
 - The marketing website is not a complete recreation; this revision focuses on the `go.fatgrid.com` workspace and all its left-navigation pages.
 
 ## Validation
 
-18 automated tests cover authentication/session invalidation, ownership, cross-origin rejection, import atomicity, credits under concurrent requests, unavailable-provider behavior, server-side order prices, support isolation, actual HTML parsing, private-network rejection, recovery refunds, grouped-check progress, exact subdomains, saved preferences, quotes, Google billing, partial provider refunds, signed invoice processing and webhook replay protection.
+31 automated tests (all also pass against MySQL 8.4 with `sql_require_primary_key=ON`, as on Aiven) cover password change and email reset, shared-project roles, Google sign-in state and email verification, cron authorization, backlink alert emails, every MySQL table having a primary key, authentication/session invalidation, ownership, cross-origin rejection, import atomicity, credits under concurrent requests, unavailable-provider behavior, server-side order prices, support isolation, actual HTML parsing, private-network rejection, recovery refunds, grouped-check progress, exact subdomains, saved preferences, quotes, Google billing, partial provider refunds, signed invoice processing and webhook replay protection.
 
 Browser checks cover local login, project creation surviving reload, named monitor creation and a real public-page crawl. Visual comparisons used the original authenticated app at the same viewport. `npm run build` checks types and generates all routes. Dependency audit is clean after patching the transitive esbuild dependency.
 

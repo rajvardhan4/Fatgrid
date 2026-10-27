@@ -34,9 +34,10 @@ export async function authenticate(request: Request, db: Database, env: Env): Pr
   }
   return user;
 }
-export function safeUser(user: Row|null) { if(!user)return null;const {password_hash,...safe}=user;return safe; }
+export function safeUser(user: Row|null) { if(!user)return null;const {password_hash,...safe}=user;return {...safe,has_password:!!password_hash}; }
+export const randomToken=()=>hex(crypto.getRandomValues(new Uint8Array(32)).buffer);
 export async function sessionCookie(db:Database,userId:string,secure:boolean) {
-  const token=hex(crypto.getRandomValues(new Uint8Array(32)).buffer);
+  const token=randomToken();
   await db.run('INSERT INTO sessions VALUES (?,?,?)',[await sha(token),userId,Date.now()+7*86400000]);
   return `fg_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure?'; Secure':''}`;
 }

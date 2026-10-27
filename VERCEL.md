@@ -27,9 +27,23 @@ Vercel framework: Next.js; build: npm run build:vercel; output: .next; Node: 24.
 
 Local development defaults to SQLite. To use MySQL locally, set MYSQL_URL in .env.local. MYSQL_SSL=false is supported only for localhost development.
 
-The separate owner-private Sites deployment continues to use its existing D1 worker. External SEO/search/billing providers still require their own credentials. Connecting MySQL does not activate those services. Scheduling requires CRON_SECRET plus a scheduler that sends authenticated POST requests to the existing cron endpoint.
+The separate owner-private Sites deployment continues to use its existing D1 worker. External SEO/search/billing providers still require their own credentials. Connecting MySQL does not activate those services. Scheduling requires CRON_SECRET; the bundled Vercel Cron then calls the endpoint daily.
 
 Do not commit .env files, database passwords or tokens. .env.vercel is a local ignored template and must be filled before import.
+
+## Optional services (add in Vercel > Settings > Environment Variables, then redeploy)
+
+Each feature stays switched off, with a clear message in the app, until its variables are set.
+
+| Feature | Variables | Where to get them |
+|---|---|---|
+| Password reset email, backlink alert email | `RESEND_API_KEY`, `EMAIL_FROM` | https://resend.com : add and verify your sending domain, create an API key. `EMAIL_FROM` looks like `FatGrid <no-reply@your-domain.com>`. |
+| Log in with Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console > APIs & Services > Credentials > OAuth client ID (Web application). Authorized redirect URI: `https://fatgrid-ebon.vercel.app/api/auth/google/callback/` (keep the final slash). |
+| Scheduled backlink monitoring | `CRON_SECRET` | Any long random string. `vercel.json` already runs a daily Vercel Cron at 06:00 UTC that sends it to `/api/internal/tick/`. |
+| Google / Backlinks / AI search | `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `PERPLEXITY_API_KEY` | DataForSEO and Perplexity accounts with balance. |
+| Paid plans and order payment | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_ADVANCED_PRICE_ID` | Stripe dashboard; webhook URL `/api/billing/webhook`. |
+
+Database changes for these features (`password_resets`, `project_members`) are applied automatically on the first request after deployment (`mysql/0002_accounts_sharing.sql`).
 
 ## If you do not have hosting yet
 

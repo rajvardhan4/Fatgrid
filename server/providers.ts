@@ -1,6 +1,8 @@
 import { load } from 'cheerio/slim';
 import { ApiError, type Env } from './auth';
 import { normalizeDomain } from '../shared/domain';
+import { emailConfigured } from './email';
+import { googleConfigured } from './google';
 export type PublicFetch = (url:string) => Promise<Response>;
 export function publicURL(input:string) {
   let u:URL;try{u=new URL(input)}catch{throw new ApiError(400,'Enter a valid public URL.');}
@@ -26,7 +28,7 @@ export async function inspectBacklink(source:string,target:string,safeFetch:Publ
   const followed=found.find(x=>!/(^|\s)(nofollow|sponsored|ugc)(\s|$)/.test(x.rel));const link=followed||found[0];
   return {status:followed?'live':link?'nofollow':'missing',http_status:response.status,anchor:link?.anchor||'',rel:link?.rel||'',error:null};
 }
-export function providerStatus(env:Env){return {google:!!(env.DATAFORSEO_LOGIN&&env.DATAFORSEO_PASSWORD),backlinks:!!(env.DATAFORSEO_LOGIN&&env.DATAFORSEO_PASSWORD),ai:!!env.PERPLEXITY_API_KEY,billing:!!(env.STRIPE_SECRET_KEY&&env.STRIPE_WEBHOOK_SECRET),scheduling:env.SCHEDULER_AVAILABLE==='0'?false:env.AUTH_MODE!=='platform'||!!env.CRON_SECRET||env.PRIVATE_SCHEDULER==='1'};}
+export function providerStatus(env:Env){return {email:emailConfigured(env),googleAuth:googleConfigured(env),google:!!(env.DATAFORSEO_LOGIN&&env.DATAFORSEO_PASSWORD),backlinks:!!(env.DATAFORSEO_LOGIN&&env.DATAFORSEO_PASSWORD),ai:!!env.PERPLEXITY_API_KEY,billing:!!(env.STRIPE_SECRET_KEY&&env.STRIPE_WEBHOOK_SECRET),scheduling:env.SCHEDULER_AVAILABLE==='0'?false:env.AUTH_MODE!=='platform'||!!env.CRON_SECRET||env.PRIVATE_SCHEDULER==='1'};}
 export async function backlinkSummary(target:string,env:Env){
  if(!providerStatus(env).backlinks)throw new ApiError(503,'Backlink data is not connected. Configure DataForSEO server credentials.');
  const response=await fetch('https://api.dataforseo.com/v3/backlinks/summary/live',{method:'POST',headers:{Authorization:`Basic ${btoa(env.DATAFORSEO_LOGIN+':'+env.DATAFORSEO_PASSWORD)}`,'Content-Type':'application/json'},body:JSON.stringify([{target,include_subdomains:false}]),signal:AbortSignal.timeout(30000)});

@@ -3,5 +3,6 @@
   "framework": "nextjs",
   "buildCommand": "npm run build:vercel",
   "outputDirectory": ".next",
-  "functions": { "pages/api/[...path].ts": { "maxDuration": 60 } }
+  "functions": { "pages/api/[...path].ts": { "maxDuration": 60 } },
+  "crons": [{ "path": "/api/internal/tick/", "schedule": "0 6 * * *" }]
 }

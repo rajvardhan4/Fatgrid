@@ -10,3 +10,7 @@ html{scrollbar-gutter:stable}::-webkit-scrollbar{width:10px;height:8px}::-webkit
 /* The reference keeps horizontal table scrolling available without a permanent gutter. */
 .workflow-table>.table-wrap{scrollbar-width:none}.workflow-table>.table-wrap::-webkit-scrollbar{display:none}.workflow-table th{height:46px}
 .not-found p{text-align:center;color:var(--muted);margin:0 0 20px}
+.auth-note{color:var(--muted);line-height:1.6;margin:0 0 16px}
+.forgot-link{float:right}
+.settings-card+.settings-card{margin-top:16px}
+.project-share{margin:0 0 12px}

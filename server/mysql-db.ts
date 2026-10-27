@@ -1,5 +1,5 @@
 import mysql, {type Pool, type PoolConnection, type RowDataPacket, type ResultSetHeader} from 'mysql2/promise';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import path from 'node:path';
 import {ApiError,type Env} from './auth';
 import type {Database,Row,Statement} from './db';
@@ -78,11 +78,14 @@ export async function migrateMySQL(pool:Pool){
   const [locks]=await c.query<RowDataPacket[]>("SELECT GET_LOCK(CONCAT('fg:migrate:',DATABASE()),30) AS acquired");
   if(locks[0].acquired!==1)throw new Error('Migration busy');locked=true;
   await c.query('CREATE TABLE IF NOT EXISTS _mysql_migrations (name VARCHAR(100) PRIMARY KEY)');
-  const [done]=await c.query<RowDataPacket[]>('SELECT name FROM _mysql_migrations WHERE name=?',['0001_initial']);
-  if(!done.length){
+  const directory=path.join(process.cwd(),'mysql');
+  for(const file of readdirSync(directory).filter(f=>f.endsWith('.sql')).sort()){
+   const name=file.replace(/\.sql$/,'');
+   const [done]=await c.query<RowDataPacket[]>('SELECT name FROM _mysql_migrations WHERE name=?',[name]);
+   if(done.length)continue;
    // MySQL DDL commits implicitly. Each statement is restart-safe.
-   for(const sql of readFileSync(path.join(process.cwd(),'mysql/0001_initial.sql'),'utf8').split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean))await c.query(sql);
-   await c.query('INSERT INTO _mysql_migrations VALUES (?)',['0001_initial']);
+   for(const sql of readFileSync(path.join(directory,file),'utf8').split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean))await c.query(sql);
+   await c.query('INSERT INTO _mysql_migrations VALUES (?)',[name]);
   }
  }finally{try{if(locked)await c.query("SELECT RELEASE_LOCK(CONCAT('fg:migrate:',DATABASE()))")}finally{c.release()}}
 }

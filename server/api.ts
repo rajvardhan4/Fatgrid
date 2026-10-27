@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { ApiError, authenticate, equal, id, limits, month, now, passwordHash, rateLimit, safeUser, sessionCookie, sha, type Env } from './auth';
+import { ApiError, authenticate, equal, id, limits, month, now, passwordHash, randomToken, rateLimit, safeUser, sessionCookie, sha, type Env } from './auth';
+import { emailConfigured, sendEmail } from './email';
+import { googleAuthURL, googleConfigured, googleProfile } from './google';
 import type { Database, Row, Statement } from './db';
 import { csvCell, normalizeDomain, parseDomains } from '../shared/domain';
 import { inspectBacklink, providerStatus, publicURL, scanProvider, backlinkSummary, type PublicFetch } from './providers';
@@ -13,6 +15,17 @@ async function body<T>(request:Request,schema:z.ZodType<T>):Promise<T>{const tex
 async function own(db:Database,table:string,recordId:string,user:Row){const row=await db.first(`SELECT * FROM ${table} WHERE id=? AND user_id=?`,[recordId,user.id]);if(!row)throw new ApiError(404,'Record not found.');return row;}
 function requireUser(user:Row|null):asserts user is Row {if(!user)throw new ApiError(401,'Log in to continue.','unauthorized');}
 function admin(user:Row){if(user.role!=='admin')throw new ApiError(403,'Administrator access required.');}
+// Owners and invited members can open a project; viewers cannot change it. role is 'owner', 'editor' or 'viewer'.
+export async function projectAccess(db:Database,projectId:string,user:Row,write=false){
+ const project=await db.first("SELECT p.*,CASE WHEN p.user_id=? THEN 'owner' ELSE m.role END AS role FROM projects p LEFT JOIN project_members m ON m.project_id=p.id AND m.user_id=? WHERE p.id=? AND (p.user_id=? OR m.user_id IS NOT NULL)",[user.id,user.id,projectId,user.id]);
+ if(!project)throw new ApiError(404,'Record not found.');
+ if(write&&project.role==='viewer')throw new ApiError(403,'You have view-only access to this project.');
+ return project;
+}
+const ownerOnly=(project:Row)=>{if(project.role!=='owner')throw new ApiError(403,'Only the project owner can do this.');};
+// Shared projects use the owner's plan for the domain limit.
+async function domainLimit(db:Database,project:Row){const owner=await db.first('SELECT plan FROM users WHERE id=?',[project.user_id]);return limits[owner?.plan||'start'].domains;}
+const redirect=(location:string,cookie?:string)=>new Response(null,{status:302,headers:{Location:location,'Cache-Control':'no-store',...(cookie?{'Set-Cookie':cookie}:{})}});
 async function addProjectDomains(db:Database,projectId:string,domains:string[],limit:number){
  const serialized=JSON.stringify([...new Set(domains)]);
  // Check the whole new batch and insert in one statement, including concurrent requests.
@@ -62,12 +75,13 @@ async function inventory(db:Database,search:URLSearchParams){
 export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFetch):Promise<Response>{
   try{
     const url=new URL(request.url),path=url.pathname.replace(/\/$/,''),method=request.method;
-    if(path==='/api/internal/tick'&&method==='POST'){
+    // Vercel Cron sends GET with "Authorization: Bearer CRON_SECRET"; other schedulers may POST.
+    if(path==='/api/internal/tick'&&(method==='POST'||method==='GET')){
       // This mode is only configured on the owner-private Sites deployment. Dispatch
       // authenticates service access before this shared, parameter-free updater runs.
       const privateDispatch=env.AUTH_MODE==='platform'&&env.PRIVATE_SCHEDULER==='1';
       if(!privateDispatch&&(!env.CRON_SECRET||!equal(request.headers.get('authorization')||'','Bearer '+env.CRON_SECRET)))throw new ApiError(401,'Unauthorized.');
-      await processGroups(db,env,safeFetch);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
+      await processGroups(db,env,safeFetch,40000);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
     }
     if(path==='/api/billing/webhook'&&method==='POST')return json(await stripeWebhook(request,db,env));
     if(!['GET','HEAD','OPTIONS'].includes(method)){
@@ -101,6 +115,38 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         }
         return json({user:safeUser(record)},200,{'Set-Cookie':await sessionCookie(db,record!.id,url.protocol==='https:')});
       }
+      const origin=env.APP_ORIGIN||url.origin,secure=url.protocol==='https:';
+      if(path==='/api/auth/forgot'&&method==='POST'){
+        const d=await body(request,z.object({email:z.string().email().max(254).transform(s=>s.toLowerCase())}));
+        if(!emailConfigured(env))throw new ApiError(503,'Password reset by email is not available yet. Contact support from your account or ask the administrator.','email_unavailable');
+        const record=await db.first('SELECT id,email FROM users WHERE email=?',[d.email]);
+        // The response is the same whether or not the account exists.
+        if(record){const token=randomToken();await db.run('INSERT INTO password_resets (token_hash,user_id,expires_at,used) VALUES (?,?,?,0)',[await sha(token),record.id,Date.now()+3600000]);await sendEmail(env,record.email,'Reset your FatGrid password',`Someone asked to reset the password for this FatGrid account.\n\nOpen this link within 1 hour to choose a new password:\n${origin}/auth/reset/?token=${token}\n\nIf you did not ask for this, ignore this email; your password stays the same.`);}
+        return json({ok:true});
+      }
+      if(path==='/api/auth/reset'&&method==='POST'){
+        const d=await body(request,z.object({token:z.string().regex(/^[0-9a-f]{64}$/),password:z.string().min(8).max(128)})),hash=await sha(d.token);
+        const reset=await db.first('SELECT * FROM password_resets WHERE token_hash=? AND used=0 AND expires_at>?',[hash,Date.now()]);
+        if(!reset||!await db.run('UPDATE password_resets SET used=1 WHERE token_hash=? AND used=0',[hash]))throw new ApiError(400,'This reset link is invalid or has expired. Request a new one.');
+        await db.batch([{sql:'UPDATE users SET password_hash=? WHERE id=?',args:[await passwordHash(d.password),reset.user_id]},{sql:'DELETE FROM sessions WHERE user_id=?',args:[reset.user_id]},{sql:'DELETE FROM password_resets WHERE user_id=? AND used=0',args:[reset.user_id]}]);
+        const record=await db.first('SELECT * FROM users WHERE id=?',[reset.user_id]);
+        return json({user:safeUser(record)},200,{'Set-Cookie':await sessionCookie(db,reset.user_id,secure)});
+      }
+      if(path==='/api/auth/google/start'&&method==='GET'){
+        if(!googleConfigured(env))throw new ApiError(503,'Google sign-in is not configured on this server.','provider_unavailable');
+        const state=randomToken();
+        return redirect(googleAuthURL(env,origin,state),`fg_oauth=${state}; Path=/api/auth/google; HttpOnly; SameSite=Lax; Max-Age=600${secure?'; Secure':''}`);
+      }
+      if(path==='/api/auth/google/callback'&&method==='GET'){
+        const failed=(reason:string)=>redirect(`${origin}/auth/login/?error=${reason}`);
+        const state=url.searchParams.get('state')||'',saved=request.headers.get('cookie')?.match(/(?:^|;\s*)fg_oauth=([^;]+)/)?.[1]||'',code=url.searchParams.get('code');
+        if(!googleConfigured(env)||!code||!state||!equal(state,saved))return failed('google');
+        let profile;try{profile=await googleProfile(env,origin,code)}catch{return failed('google')}
+        if(!profile.verified)return failed('google_unverified');
+        let record=await db.first('SELECT * FROM users WHERE email=?',[profile.email]);
+        if(!record){const uid=id();await db.run('INSERT INTO users (id,email,name,role,period,created_at) VALUES (?,?,?,?,?,?)',[uid,profile.email,profile.name||profile.email.split('@')[0],'member',month(),now()]);record=await db.first('SELECT * FROM users WHERE id=?',[uid]);}
+        return redirect(origin+'/',await sessionCookie(db,record!.id,secure));
+      }
       throw new ApiError(404,'Authentication route not found.');
     }
     if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams));
@@ -112,12 +158,20 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     const grouped=await groupApi(request,db,env,safeFetch,user);if(grouped!==undefined)return json(grouped);
     if(path==='/api/preferences'){
       if(method==='GET')return json(Object.fromEntries((await db.all('SELECT key,value FROM preferences WHERE user_id=?',[user.id])).map(r=>[r.key,JSON.parse(r.value)])));
-      if(method==='POST'){const d=await body(request,z.object({key:z.enum(['columns','presets','activeProject','dismissNotice']),value:z.unknown()}));if(JSON.stringify(d.value).length>20000)throw new ApiError(400,'Preference is too large.');await db.run('INSERT INTO preferences (user_id,key,value) VALUES (?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[user.id,d.key,JSON.stringify(d.value)]);return json({ok:true});}
+      if(method==='POST'){const d=await body(request,z.object({key:z.enum(['columns','presets','activeProject','dismissNotice','emailAlerts']),value:z.unknown()}));if(JSON.stringify(d.value).length>20000)throw new ApiError(400,'Preference is too large.');await db.run('INSERT INTO preferences (user_id,key,value) VALUES (?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[user.id,d.key,JSON.stringify(d.value)]);return json({ok:true});}
+    }
+    if(path==='/api/account/password'&&method==='POST'){
+      await rateLimit(db,'password:'+user.id,10,15*60000);
+      const d=await body(request,z.object({current_password:z.string().max(128).default(''),new_password:z.string().min(8).max(128)}));
+      // Accounts created with Google have no password yet and may set one without a current password.
+      if(user.password_hash&&!equal(await passwordHash(d.current_password,user.password_hash.split(':')[1]),user.password_hash))throw new ApiError(400,'Current password is incorrect.');
+      await db.batch([{sql:'UPDATE users SET password_hash=? WHERE id=?',args:[await passwordHash(d.new_password),user.id]},{sql:'DELETE FROM sessions WHERE user_id=?',args:[user.id]}]);
+      return json({ok:true},200,{'Set-Cookie':await sessionCookie(db,user.id,url.protocol==='https:')});
     }
     if(path==='/api/decisions'){
       const project=url.searchParams.get('project')||'';
       if(method==='GET')return json({rows:await db.all('SELECT * FROM publisher_decisions WHERE user_id=? AND (project_id=? OR project_id=\'\')',[user.id,project])});
-      if(method==='POST'){const d=await body(request,z.object({domain,project_id:z.string().default(''),decision:z.enum(['','yes','maybe','no','blacklist']).optional(),favorite:z.boolean().optional(),notes:z.string().max(5000).optional()}));if(d.project_id)await own(db,'projects',d.project_id,user);if(d.decision==='yes'&&d.project_id)await addProjectDomains(db,d.project_id,[d.domain],limits[user.plan].domains);const old=await db.first('SELECT * FROM publisher_decisions WHERE user_id=? AND domain=? AND project_id=?',[user.id,d.domain,d.project_id]);await db.run('INSERT INTO publisher_decisions (id,user_id,domain,project_id,decision,favorite,notes) VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,domain,project_id) DO UPDATE SET decision=excluded.decision,favorite=excluded.favorite,notes=excluded.notes',[id(),user.id,d.domain,d.project_id,d.decision??old?.decision??'',d.favorite===undefined?(old?.favorite??0):Number(d.favorite),d.notes??old?.notes??'']);return json({ok:true});}
+      if(method==='POST'){const d=await body(request,z.object({domain,project_id:z.string().default(''),decision:z.enum(['','yes','maybe','no','blacklist']).optional(),favorite:z.boolean().optional(),notes:z.string().max(5000).optional()}));if(d.project_id){const project=await projectAccess(db,d.project_id,user,d.decision==='yes');if(d.decision==='yes')await addProjectDomains(db,d.project_id,[d.domain],await domainLimit(db,project));}const old=await db.first('SELECT * FROM publisher_decisions WHERE user_id=? AND domain=? AND project_id=?',[user.id,d.domain,d.project_id]);await db.run('INSERT INTO publisher_decisions (id,user_id,domain,project_id,decision,favorite,notes) VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,domain,project_id) DO UPDATE SET decision=excluded.decision,favorite=excluded.favorite,notes=excluded.notes',[id(),user.id,d.domain,d.project_id,d.decision??old?.decision??'',d.favorite===undefined?(old?.favorite??0):Number(d.favorite),d.notes??old?.notes??'']);return json({ok:true});}
     }
     if(path==='/api/price-check'&&method==='POST'){
       const data=await body(request,z.object({text:z.string().min(1).max(100000)}));const parsed=parseDomains(data.text);
@@ -132,21 +186,26 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       const csv=[['Publisher','Best Price','Offers','AS','DR','Country','Traffic'].map(csvCell).join(','),...rows.map(p=>[p.domain,p.price,p.offers,p.authority,p.dr,p.country,p.traffic].map(csvCell).join(','))].join('\r\n');await finish(db,job,{rows:rows.length});return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="publishers.csv"','Cache-Control':'no-store'}});
     }
     if(path==='/api/projects'){
-      if(method==='GET')return json({rows:await db.all('SELECT p.*,(SELECT COUNT(*) FROM project_domains d WHERE d.project_id=p.id) AS domain_count FROM projects p WHERE user_id=? AND archived=0 ORDER BY created_at DESC',[user.id])});
+      if(method==='GET')return json({rows:await db.all("SELECT p.*,'owner' AS role,u.email AS owner_email,(SELECT COUNT(*) FROM project_domains d WHERE d.project_id=p.id) AS domain_count FROM projects p JOIN users u ON u.id=p.user_id WHERE p.user_id=? AND p.archived=0 UNION ALL SELECT p.*,m.role,u.email,(SELECT COUNT(*) FROM project_domains d WHERE d.project_id=p.id) FROM project_members m JOIN projects p ON p.id=m.project_id JOIN users u ON u.id=p.user_id WHERE m.user_id=? AND p.archived=0 ORDER BY created_at DESC",[user.id,user.id])});
       if(method==='POST'){const d=await body(request,z.object({name:str,domain:z.string().max(253).default(''),description:z.string().max(2000).default('')}));const pid=id();const count=await db.run('INSERT INTO projects (id,user_id,name,domain,description,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM projects WHERE user_id=? AND archived=0)<?',[pid,user.id,d.name,d.domain?normalizeDomain(d.domain):'',d.description,now(),user.id,limits[user.plan].projects]);if(!count)throw new ApiError(402,'Your plan project limit has been reached.');return json({id:pid},201);}
     }
-    const projectMatch=path.match(/^\/api\/projects\/([^/]+)(?:\/(domains))?$/);
-    if(projectMatch){const project=await own(db,'projects',projectMatch[1],user);
-      if(projectMatch[2]){
+    const projectMatch=path.match(/^\/api\/projects\/([^/]+)(?:\/(domains|members)(?:\/([^/]+))?)?$/);
+    if(projectMatch){const project=await projectAccess(db,projectMatch[1],user,!['GET','HEAD'].includes(method)&&projectMatch[2]!=='members');
+      if(projectMatch[2]==='domains'&&!projectMatch[3]){
         if(method==='GET')return json({project,rows:await db.all('SELECT * FROM project_domains WHERE project_id=? ORDER BY created_at DESC',[project.id])});
-        if(method==='POST'){const d=await body(request,z.object({text:z.string().max(100000)})),parsed=parseDomains(d.text);if(!parsed.domains.length)throw new ApiError(400,'No valid domains found.');if(parsed.domains.length>500)throw new ApiError(400,'Add up to 500 domains at a time.');await addProjectDomains(db,project.id,parsed.domains.map(x=>x.domain),limits[user.plan].domains);return json({ok:true});}
-      }else{
-        if(method==='DELETE'){await db.run('UPDATE projects SET archived=1 WHERE id=?',[project.id]);return json({ok:true});}
-        if(method==='PATCH'){const d=await body(request,z.object({name:str,description:z.string().max(2000).default('')}));await db.run('UPDATE projects SET name=?,description=? WHERE id=?',[d.name,d.description,project.id]);return json({ok:true});}
+        if(method==='POST'){const d=await body(request,z.object({text:z.string().max(100000)})),parsed=parseDomains(d.text);if(!parsed.domains.length)throw new ApiError(400,'No valid domains found.');if(parsed.domains.length>500)throw new ApiError(400,'Add up to 500 domains at a time.');await addProjectDomains(db,project.id,parsed.domains.map(x=>x.domain),await domainLimit(db,project));return json({ok:true});}
+      }else if(projectMatch[2]==='members'){
+        if(method==='GET'&&!projectMatch[3])return json({role:project.role,rows:await db.all("SELECT u.id,u.email,u.name,'owner' AS role FROM users u WHERE u.id=? UNION ALL SELECT u.id,u.email,u.name,m.role FROM project_members m JOIN users u ON u.id=m.user_id WHERE m.project_id=?",[project.user_id,project.id])});
+        if(method==='POST'&&!projectMatch[3]){ownerOnly(project);const d=await body(request,z.object({email:z.string().email().max(254).transform(s=>s.toLowerCase()),role:z.enum(['viewer','editor'])}));const member=await db.first('SELECT id FROM users WHERE email=?',[d.email]);if(!member)throw new ApiError(404,'No account uses that email. Ask them to sign up first, then invite them again.');if(member.id===user.id)throw new ApiError(400,'You already own this project.');await db.run('INSERT INTO project_members (project_id,user_id,role,created_at) VALUES (?,?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role',[project.id,member.id,d.role,now()]);return json({ok:true},201);}
+        // The owner removes anyone; a member may remove only themselves (leave the project).
+        if(method==='DELETE'&&projectMatch[3]){if(projectMatch[3]!==user.id)ownerOnly(project);await db.run('DELETE FROM project_members WHERE project_id=? AND user_id=?',[project.id,projectMatch[3]]);return json({ok:true});}
+      }else if(!projectMatch[2]){
+        if(method==='DELETE'){ownerOnly(project);await db.run('UPDATE projects SET archived=1 WHERE id=?',[project.id]);return json({ok:true});}
+        if(method==='PATCH'){ownerOnly(project);const d=await body(request,z.object({name:str,description:z.string().max(2000).default('')}));await db.run('UPDATE projects SET name=?,description=? WHERE id=?',[d.name,d.description,project.id]);return json({ok:true});}
       }
     }
     const domainMatch=path.match(/^\/api\/project-domains\/([^/]+)$/);
-    if(domainMatch){const row=await db.first('SELECT d.* FROM project_domains d JOIN projects p ON p.id=d.project_id WHERE d.id=? AND p.user_id=?',[domainMatch[1],user.id]);if(!row)throw new ApiError(404,'Domain not found.');if(method==='DELETE'){await db.run('DELETE FROM project_domains WHERE id=?',[row.id]);return json({ok:true});}if(method==='PATCH'){const d=await body(request,z.object({status:z.enum(['prospect','contacted','negotiating','ordered','published','rejected']),notes:z.string().max(5000)}));await db.run('UPDATE project_domains SET status=?,notes=? WHERE id=?',[d.status,d.notes,row.id]);return json({ok:true});}}
+    if(domainMatch){const row=await db.first('SELECT * FROM project_domains WHERE id=?',[domainMatch[1]]);if(!row)throw new ApiError(404,'Domain not found.');await projectAccess(db,row.project_id,user,true).catch(e=>{throw e instanceof ApiError&&e.status===404?new ApiError(404,'Domain not found.'):e});if(method==='DELETE'){await db.run('DELETE FROM project_domains WHERE id=?',[row.id]);return json({ok:true});}if(method==='PATCH'){const d=await body(request,z.object({status:z.enum(['prospect','contacted','negotiating','ordered','published','rejected']),notes:z.string().max(5000)}));await db.run('UPDATE project_domains SET status=?,notes=? WHERE id=?',[d.status,d.notes,row.id]);return json({ok:true});}}
     if(path==='/api/orders'){
       if(method==='GET')return json({rows:await db.all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC',[user.id])});
       if(method==='POST'){const d=await body(request,z.object({offer_id:str,content:z.string().trim().min(20).max(100000),target_url:publicUrl,anchor:str}));const offer=await db.first('SELECT * FROM offers WHERE id=? AND active=1',[d.offer_id]);if(!offer)throw new ApiError(404,'Offer is no longer available.');const oid=id();await db.run('INSERT INTO orders (id,user_id,offer_id,domain,marketplace,price,content,target_url,anchor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[oid,user.id,offer.id,offer.domain,offer.marketplace,offer.price,d.content,d.target_url,d.anchor,now()]);return json({id:oid},201);}
@@ -184,7 +243,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       const d=await body(request,z.object({kind:z.enum(['google','backlinks','ai']),query:str,country:z.enum(['United States','United Kingdom','India','Canada','Australia','Germany']).default('United States'),language:z.enum(['en','hi','fr','de','es']).default('en'),depth:z.number().int().min(10).max(200).default(100),project_id:z.string().default(''),targets:z.array(domain).max(100).default([])}));
       if(!providerStatus(env)[d.kind])throw new ApiError(503,'This scanner is not connected. Ask the administrator to configure the provider.','provider_unavailable');
       if(d.kind==='backlinks'&&!normalizeDomain(d.query))throw new ApiError(400,'Enter a valid competitor domain.');
-      if(d.project_id)await own(db,'projects',d.project_id,user);
+      if(d.project_id)await projectAccess(db,d.project_id,user);
       const cost=d.kind==='ai'?10:d.kind==='google'?Math.ceil(d.depth/10):d.depth;
       const job=await reserve(db,user,d.kind,d.query,cost);
       try{await db.run('INSERT INTO scan_details (job_id,country,language,project_id,targets,model) VALUES (?,?,?,?,?,?)',[job,d.country,d.language,d.project_id||null,JSON.stringify(d.targets),d.kind==='ai'?'Perplexity Agent':'']);const result=await scanProvider(d.kind,d.query,d.country,d.depth,env,d.language);const rows:Row[]=[];for(const row of result.rows){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[row.domain]);rows.push({...row,...p,found:!!p,target:d.targets.includes(row.domain)});}const data={...result,rows,job};await finish(db,job,data,d.kind==='backlinks'?Math.max(0,cost-rows.length):0);return json(data);}catch(e){await refund(db,job,'Provider could not complete the scan.');throw e;}
