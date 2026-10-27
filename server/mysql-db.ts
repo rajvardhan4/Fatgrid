@@ -84,7 +84,8 @@ export async function migrateMySQL(pool:Pool){
    const [done]=await c.query<RowDataPacket[]>('SELECT name FROM _mysql_migrations WHERE name=?',[name]);
    if(done.length)continue;
    // MySQL DDL commits implicitly. Each statement is restart-safe.
-   for(const sql of readFileSync(path.join(directory,file),'utf8').split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean))await c.query(sql);
+   // A re-run after an interrupted ALTER skips the column or index that already exists.
+   for(const sql of readFileSync(path.join(directory,file),'utf8').split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean))try{await c.query(sql)}catch(e){if(!['ER_DUP_FIELDNAME','ER_DUP_KEYNAME'].includes((e as {code?:string}).code||''))throw e}
    await c.query('INSERT INTO _mysql_migrations VALUES (?)',[name]);
   }
  }finally{try{if(locked)await c.query("SELECT RELEASE_LOCK(CONCAT('fg:migrate:',DATABASE()))")}finally{c.release()}}

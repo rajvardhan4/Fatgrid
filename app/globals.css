@@ -45,3 +45,23 @@ html{scrollbar-gutter:stable}::-webkit-scrollbar{width:10px;height:8px}::-webkit
 .cell-title{display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
 .num{font-family:'Geist Mono',monospace;font-size:13px}
 .q-mark{font-size:10px;font-weight:700;line-height:1}
+@font-face{font-family:'Twemoji Country Flags';src:url('/fonts/twemoji-country-flags.woff2') format('woff2');unicode-range:U+1F1E6-1F1FF;font-display:swap}
+.publisher-table td{background:#fff}
+.publisher-table tbody tr:hover td{background:#fafafb}
+.publisher-table td.group-start{border-left:1px solid var(--line)}
+.publisher-table .sticky{position:sticky;z-index:2;background:#fff}
+.publisher-table thead .sticky{z-index:3}
+.publisher-table .sticky-select{left:0;min-width:40px;width:40px}
+.publisher-table .sticky-domain{left:40px;min-width:230px;width:230px;max-width:230px}
+.publisher-table .sticky-price{left:270px;min-width:92px;box-shadow:inset -1px 0 0 var(--line),8px 0 8px -8px rgba(0,0,0,.18)}
+.publisher-table .publisher-cell{overflow:hidden;text-overflow:ellipsis}
+.country{display:inline-flex;align-items:center;gap:8px;font-size:14px}
+.flag{font-family:'Twemoji Country Flags','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif;font-size:16px;line-height:1}
+.follow{font-weight:500;font-size:14px}
+.niche-icons{display:inline-flex;align-items:center;gap:12px;color:#c08a00}
+.niche-icons span{display:inline-flex}
+.note-button{display:inline-flex;align-items:center;gap:5px;padding:4px 11px;min-height:0;border:1px solid #e3e3e8;border-radius:6px;background:#fff;color:#8a8a92;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-button.has-note{color:var(--ink)}
+.publisher-table td .num{font-size:14px}
+.niche-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px 12px;margin:6px 0 4px}
+@media(max-width:700px){.publisher-table .sticky{position:static;box-shadow:none}.publisher-table .sticky-domain{min-width:180px;width:auto}}

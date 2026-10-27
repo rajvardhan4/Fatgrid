@@ -28,3 +28,11 @@ export function csvCell(value: unknown) {
 // Sample listings that show how the marketplace looks. Marked everywhere and never orderable.
 export const DEMO_SOURCE = 'Demo sample';
 export const isDemo = (row: { metrics_source?: string; marketplace?: string } | null | undefined) => row?.metrics_source === DEMO_SOURCE || row?.marketplace === DEMO_SOURCE;
+// Restricted niches a publisher accepts, stored as a comma list such as "casino,crypto".
+export const NICHES = [['casino', 'Casino & gambling'], ['cbd', 'CBD & cannabis'], ['crypto', 'Crypto'], ['dating', 'Dating'], ['forex', 'Forex & trading'], ['pharma', 'Pharma'], ['other', 'Other restricted niches']] as const;
+const nicheAliases: Record<string, string> = { gambling: 'casino', betting: 'casino', cannabis: 'cbd', bitcoin: 'crypto', trading: 'forex', finance: 'forex', pharmacy: 'pharma', health: 'pharma' };
+export function parseNiches(value: unknown): string {
+  const allowed = NICHES.map(([key]) => key as string);
+  const keys = String(value ?? '').toLowerCase().split(/[,;|]/).map(s => s.trim()).filter(Boolean).map(s => nicheAliases[s] || s);
+  return [...new Set(keys.filter(k => allowed.includes(k)))].join(',');
+}
