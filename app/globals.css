@@ -9,3 +9,4 @@ html{scrollbar-gutter:stable}::-webkit-scrollbar{width:10px;height:8px}::-webkit
 .reference-notice{padding-left:12px}.reference-notice:before{content:none}.reference-notice>svg{flex:none}
 /* The reference keeps horizontal table scrolling available without a permanent gutter. */
 .workflow-table>.table-wrap{scrollbar-width:none}.workflow-table>.table-wrap::-webkit-scrollbar{display:none}.workflow-table th{height:46px}
+.not-found p{text-align:center;color:var(--muted);margin:0 0 20px}
