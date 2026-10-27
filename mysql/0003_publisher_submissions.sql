@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS `publisher_submissions` (
+	`id` VARCHAR(191) PRIMARY KEY NOT NULL,
+	`domain` VARCHAR(253) NOT NULL,
+	`title` LONGTEXT NOT NULL,
+	`category` VARCHAR(100) DEFAULT '' NOT NULL,
+	`country` VARCHAR(100) DEFAULT '' NOT NULL,
+	`language` VARCHAR(100) DEFAULT 'English' NOT NULL,
+	`guest_post_price` DOUBLE,
+	`link_insertion_price` DOUBLE,
+	`follow` VARCHAR(20) DEFAULT 'dofollow' NOT NULL,
+	`sponsored` BIGINT DEFAULT 0 NOT NULL,
+	`restricted` BIGINT DEFAULT 0 NOT NULL,
+	`sample_url` LONGTEXT NOT NULL,
+	`contact_name` LONGTEXT NOT NULL,
+	`contact_email` VARCHAR(254) NOT NULL,
+	`notes` LONGTEXT NOT NULL,
+	`status` VARCHAR(20) DEFAULT 'pending' NOT NULL,
+	`review_note` LONGTEXT NOT NULL,
+	`user_id` VARCHAR(191),
+	`created_at` VARCHAR(40) NOT NULL,
+	`reviewed_at` VARCHAR(40),
+ KEY `publisher_submissions_status` (`status`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

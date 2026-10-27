@@ -25,6 +25,14 @@ export async function projectAccess(db:Database,projectId:string,user:Row,write=
 const ownerOnly=(project:Row)=>{if(project.role!=='owner')throw new ApiError(403,'Only the project owner can do this.');};
 // Shared projects use the owner's plan for the domain limit.
 async function domainLimit(db:Database,project:Row){const owner=await db.first('SELECT plan FROM users WHERE id=?',[project.user_id]);return limits[owner?.plan||'start'].domains;}
+const optionalPrice=z.preprocess(v=>v===''||v==null?null:Number(v),z.number().min(1,'Prices must be at least $1.').max(1000000).nullable()).optional().transform(v=>v??null);
+const submissionSchema=z.object({domain,title:z.string().trim().max(200).default(''),category:z.string().trim().max(100).default(''),country:z.string().trim().max(100).default(''),language:z.string().trim().max(100).default('English'),guest_post_price:optionalPrice,link_insertion_price:optionalPrice,follow:z.enum(['dofollow','nofollow']).default('dofollow'),sponsored:z.boolean().default(false),restricted:z.boolean().default(false),sample_url:z.union([publicUrl,z.literal('')]).default(''),contact_name:z.string().trim().min(1).max(100),contact_email:z.string().trim().email().max(254).transform(s=>s.toLowerCase()),notes:z.string().trim().max(2000).default(''),website:z.string().max(500).default('')}).refine(d=>d.guest_post_price!==null||d.link_insertion_price!==null,{message:'Enter a guest post or a link insertion price.',path:['price']});
+// Approving a submission lists it as "Direct from publisher" offers. Existing publisher metrics are kept.
+function approvalStatements(s:Row):Statement[]{
+ const offers=([['Guest Post',s.guest_post_price],['Link Insertion',s.link_insertion_price]] as const).filter(([,price])=>price!=null);
+ return [{sql:"INSERT INTO publishers (domain,title,category,language,country,updated_at,metrics_source) VALUES (?,?,?,?,?,?,'Publisher submitted') ON CONFLICT(domain) DO UPDATE SET updated_at=excluded.updated_at",args:[s.domain,s.title,s.category,s.language,s.country,now()]},
+  ...offers.map(([type,price])=>({sql:'INSERT INTO offers (id,domain,marketplace,price,type,follow,sponsored,restricted,url,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(domain,marketplace,type) DO UPDATE SET price=excluded.price,follow=excluded.follow,sponsored=excluded.sponsored,restricted=excluded.restricted,url=excluded.url,active=1,updated_at=excluded.updated_at',args:[id(),s.domain,'Direct from publisher',price,type,s.follow,s.sponsored,s.restricted,s.sample_url,now()]}))];
+}
 const redirect=(location:string,cookie?:string)=>new Response(null,{status:302,headers:{Location:location,'Cache-Control':'no-store',...(cookie?{'Set-Cookie':cookie}:{})}});
 async function addProjectDomains(db:Database,projectId:string,domains:string[],limit:number){
  const serialized=JSON.stringify([...new Set(domains)]);
@@ -151,6 +159,13 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     }
     if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams));
     if(path==='/api/inventory/options'&&method==='GET')return json({countries:await db.all("SELECT DISTINCT country AS value FROM publishers WHERE country<>'' ORDER BY country"),categories:await db.all("SELECT DISTINCT category AS value FROM publishers WHERE category<>'' ORDER BY category"),marketplaces:await db.all('SELECT DISTINCT marketplace AS value FROM offers ORDER BY marketplace')});
+    if(path==='/api/submissions'&&method==='POST'){
+      await rateLimit(db,'submit:'+(request.headers.get('x-client-ip')||'unknown'),5,3600000);
+      const d=await body(request,submissionSchema);
+      // Bots fill the hidden "website" field; accept silently without storing.
+      if(!d.website)await db.run('INSERT INTO publisher_submissions (id,domain,title,category,country,language,guest_post_price,link_insertion_price,follow,sponsored,restricted,sample_url,contact_name,contact_email,notes,status,review_note,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[id(),d.domain,d.title,d.category,d.country,d.language||'English',d.guest_post_price,d.link_insertion_price,d.follow,Number(d.sponsored),Number(d.restricted),d.sample_url,d.contact_name,d.contact_email,d.notes,'pending','',user?.id||null,now()]);
+      return json({ok:true},201);
+    }
     if(path==='/api/offers'&&method==='GET'){const d=normalizeDomain(url.searchParams.get('domain')||'');return json({publisher:await db.first('SELECT * FROM publishers WHERE domain=?',[d]),offers:await db.all('SELECT * FROM offers WHERE domain=? AND active=1 ORDER BY price,marketplace',[d])});}
     requireUser(user);
     if(method!=='GET')await rateLimit(db,'write:'+user.id,100);
@@ -269,7 +284,18 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         collections.monitor_group_history=await db.all('SELECT h.* FROM monitor_group_history h JOIN monitor_groups g ON g.id=h.group_id WHERE g.user_id=? ORDER BY h.created_at DESC LIMIT 100',[uid]);
         return json({account,collections});
       }
-      if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n});
+      if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n,submissions:(await db.first("SELECT COUNT(*) AS n FROM publisher_submissions WHERE status='pending'"))!.n});
+      if(path==='/api/admin/submissions'&&method==='GET')return json({rows:await db.all("SELECT * FROM publisher_submissions ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,created_at DESC LIMIT 200")});
+      const submissionMatch=path.match(/^\/api\/admin\/submissions\/([^/]+)$/);
+      if(submissionMatch&&method==='PATCH'){
+        const d=await body(request,z.object({action:z.enum(['approve','reject']),note:z.string().trim().max(1000).default('')}));
+        const s=await db.first('SELECT * FROM publisher_submissions WHERE id=?',[submissionMatch[1]]);
+        if(!s)throw new ApiError(404,'Submission not found.');
+        if(s.status!=='pending')throw new ApiError(409,'This submission was already reviewed.');
+        await db.batch([...(d.action==='approve'?approvalStatements(s):[]),{sql:"UPDATE publisher_submissions SET status=?,review_note=?,reviewed_at=? WHERE id=? AND status='pending'",args:[d.action==='approve'?'approved':'rejected',d.note,now(),s.id]}]);
+        if(emailConfigured(env))await sendEmail(env,s.contact_email,d.action==='approve'?`${s.domain} is now listed`:`About your listing request for ${s.domain}`,d.action==='approve'?`Thanks, ${s.contact_name}. ${s.domain} is now listed in the marketplace with the prices you sent.${d.note?`\n\nNote from the team: ${d.note}`:''}`:`Thanks, ${s.contact_name}. We could not list ${s.domain} right now.${d.note?`\n\nReason: ${d.note}`:''}`).catch(()=>console.error('Submission email failed.'));
+        return json({ok:true});
+      }
       if(path==='/api/admin/inventory'&&method==='POST'){
         const data=await body(request,z.object({rows:z.array(z.object({domain,marketplace:str,price:z.coerce.number().min(0).max(1000000),type:z.enum(['Guest Post','Link Insertion']).default('Guest Post'),title:z.string().max(500).default(''),category:z.string().max(100).default(''),country:z.string().max(100).default(''),language:z.string().max(100).default('English'),authority:z.coerce.number().int().min(0).max(100).nullable().default(null),dr:z.coerce.number().int().min(0).max(100).nullable().default(null),traffic:z.coerce.number().int().min(0).nullable().default(null),referring_domains:z.coerce.number().int().min(0).nullable().default(null),traffic_top:z.coerce.number().int().min(0).nullable().default(null),all_traffic_top:z.coerce.number().int().min(0).nullable().default(null),all_traffic:z.coerce.number().int().min(0).nullable().default(null),monthly_min:z.coerce.number().int().min(0).nullable().default(null),follow:z.enum(['dofollow','nofollow']).default('dofollow'),sponsored:z.coerce.number().min(0).max(1).default(0),restricted:z.coerce.number().min(0).max(1).default(0),url:z.union([publicUrl,z.literal('')]).default(''),metrics_source:z.string().max(100).default('Imported')})).min(1).max(250)}));
         // Validate the entire upload before executing one atomic batch. Never seed invented prices.
