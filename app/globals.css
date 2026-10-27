@@ -65,3 +65,58 @@ html{scrollbar-gutter:stable}::-webkit-scrollbar{width:10px;height:8px}::-webkit
 .publisher-table td .num{font-size:14px}
 .niche-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px 12px;margin:6px 0 4px}
 @media(max-width:700px){.publisher-table .sticky{position:static;box-shadow:none}.publisher-table .sticky-domain{min-width:180px;width:auto}}
+/* Marketplace table typography and spacing, matched to the go.fatgrid.com inventory table. */
+.publisher-table{font-family:Geist,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:19.5px;color:#000}
+.publisher-table th,.publisher-table td{border-bottom:.8px solid var(--line)}
+.publisher-table .group-row th{padding:8px 12px 2px;height:25px;font-size:10px;font-weight:600;line-height:15px;letter-spacing:.9px;color:var(--muted);border-bottom:0;border-left:0;background:#fff}
+.publisher-table .group-row th.group-start{border-left:0;box-shadow:inset 1px 0 0 0 var(--line)}
+.publisher-table thead tr:not(.group-row) th{padding:4px 12px 9px;height:33px;font-size:12px;font-weight:500;line-height:18px;color:var(--muted);background:#fff;border-left:0}
+.publisher-table .table-sort{font-size:12px;font-weight:500;line-height:18px;color:var(--muted);text-decoration:underline dotted var(--muted);text-underline-offset:2px}
+.publisher-table td{height:56px;padding:0 12px;font-size:13px;line-height:19.5px;color:#000;background:#fff;vertical-align:middle}
+.publisher-table td.group-start{border-left:0}
+.publisher-table .sticky-select{left:0;min-width:40px;width:40px}
+.publisher-table .sticky-domain{left:40px;min-width:190px;width:190px;max-width:190px}
+.publisher-table .sticky-price{left:230px;min-width:100px;width:100px;box-shadow:rgba(40,60,115,.18) 6px 0 8px -6px}
+.publisher-table td.sticky{z-index:4}
+.publisher-table thead .sticky{z-index:5}
+.publisher-table .publisher{display:flex;flex-direction:column;gap:3px}
+.publisher-name{font-size:13px;font-weight:500;line-height:15.6px;color:#000}
+.publisher-table .publisher-actions{margin-top:0;gap:3px}
+.publisher-table .publisher-actions button,.publisher-table .publisher-actions a{color:var(--muted)}
+.publisher-table .action-gap{width:4px}
+.price-link{font-family:'Geist Mono',monospace;font-size:13.5px;font-weight:600;line-height:20.25px;color:#000}
+.offers-pill{gap:6px;padding:4px 12px;height:26px;font-size:12px;font-weight:600;line-height:18px;background:var(--accent)}
+.offers-pill svg{width:13px;height:13px}
+.type-badge{padding:1px 6px;border:.8px solid rgb(187,200,237);border-radius:9999px;background:rgb(232,236,249);color:#000;font-size:11px;font-weight:500;line-height:15.95px}
+.chip-list{gap:4px;padding:4px 0;max-width:196px}
+.category-chip{padding:2px 8px;border:.8px solid var(--line);border-radius:9999px;background:#f5f5f7;color:var(--ink);font-size:11px;font-weight:400;line-height:16.5px}
+.cell-title{max-width:126px;font-size:13px}
+.publisher-table td .num{font-family:'Geist Mono',monospace;font-size:13px;font-weight:400;line-height:19.5px;color:#000}
+.country{gap:5px;font-size:13px}
+.flag{font-size:15px;line-height:15px}
+.follow{font-size:13px;font-weight:500}
+.publisher-table td[data-col=sponsored]{color:var(--muted)}
+.niche-icons{gap:4px;color:#977006}
+.niche-icons span{width:18px;height:18px;align-items:center;justify-content:center;border-radius:4px}
+.niche-icons svg{width:13px;height:13px}
+.note-button{gap:4px;padding:2px 8px;border:.8px dashed var(--line);border-radius:6px;font-size:11px;line-height:16.5px;color:var(--muted);background:transparent}
+.note-button svg{width:12px;height:12px}
+.publisher-table [data-col=offers]{min-width:130px}
+.publisher-table [data-col=type]{min-width:120px}
+.publisher-table [data-col=category]{min-width:220px}
+.publisher-table [data-col=title]{min-width:150px}
+.publisher-table [data-col=language]{min-width:100px}
+.publisher-table [data-col=authority],.publisher-table [data-col=dr]{min-width:60px}
+.publisher-table [data-col=referring_domains]{min-width:85px}
+.publisher-table [data-col=country]{min-width:200px}
+.publisher-table [data-col=traffic_top],.publisher-table [data-col=all_traffic_top],.publisher-table [data-col=updated_at]{min-width:110px}
+.publisher-table [data-col=traffic],.publisher-table [data-col=monthly_min],.publisher-table [data-col=all_traffic]{min-width:95px}
+.publisher-table [data-col=follow]{min-width:90px}
+.publisher-table [data-col=sponsored]{min-width:100px}
+.publisher-table [data-col=restricted]{min-width:180px}
+.publisher-table [data-col=notes]{min-width:120px}
+.segmented button{font-size:12px;font-weight:500;padding:6px 14px;color:var(--muted);background:#fff}
+.segmented .chosen{background:rgb(235,239,250);color:var(--accent)}
+.table-actions button{font-size:13px;font-weight:500;padding:6px 12px;color:var(--ink);border:.8px solid var(--line);border-radius:6px;background:#fff}
+@media(max-width:700px){.publisher-table .sticky{position:static;box-shadow:none}.publisher-table .sticky-domain{min-width:170px;width:auto}}
+.note-button{font-weight:400}
