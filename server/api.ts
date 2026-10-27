@@ -3,7 +3,8 @@ import { ApiError, authenticate, equal, id, limits, month, now, passwordHash, ra
 import { emailConfigured, sendEmail } from './email';
 import { googleAuthURL, googleConfigured, googleProfile } from './google';
 import type { Database, Row, Statement } from './db';
-import { csvCell, normalizeDomain, parseDomains } from '../shared/domain';
+import { csvCell, isDemo, normalizeDomain, parseDomains } from '../shared/domain';
+import { clearDemo, demoCount, loadDemo } from './demo';
 import { inspectBacklink, providerStatus, publicURL, scanProvider, backlinkSummary, type PublicFetch } from './providers';
 import { checkout, stripeWebhook } from './billing';
 import { groupApi, processGroups } from './monitoring';
@@ -223,7 +224,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     if(domainMatch){const row=await db.first('SELECT * FROM project_domains WHERE id=?',[domainMatch[1]]);if(!row)throw new ApiError(404,'Domain not found.');await projectAccess(db,row.project_id,user,true).catch(e=>{throw e instanceof ApiError&&e.status===404?new ApiError(404,'Domain not found.'):e});if(method==='DELETE'){await db.run('DELETE FROM project_domains WHERE id=?',[row.id]);return json({ok:true});}if(method==='PATCH'){const d=await body(request,z.object({status:z.enum(['prospect','contacted','negotiating','ordered','published','rejected']),notes:z.string().max(5000)}));await db.run('UPDATE project_domains SET status=?,notes=? WHERE id=?',[d.status,d.notes,row.id]);return json({ok:true});}}
     if(path==='/api/orders'){
       if(method==='GET')return json({rows:await db.all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC',[user.id])});
-      if(method==='POST'){const d=await body(request,z.object({offer_id:str,content:z.string().trim().min(20).max(100000),target_url:publicUrl,anchor:str}));const offer=await db.first('SELECT * FROM offers WHERE id=? AND active=1',[d.offer_id]);if(!offer)throw new ApiError(404,'Offer is no longer available.');const oid=id();await db.run('INSERT INTO orders (id,user_id,offer_id,domain,marketplace,price,content,target_url,anchor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[oid,user.id,offer.id,offer.domain,offer.marketplace,offer.price,d.content,d.target_url,d.anchor,now()]);return json({id:oid},201);}
+      if(method==='POST'){const d=await body(request,z.object({offer_id:str,content:z.string().trim().min(20).max(100000),target_url:publicUrl,anchor:str}));const offer=await db.first('SELECT * FROM offers WHERE id=? AND active=1',[d.offer_id]);if(!offer)throw new ApiError(404,'Offer is no longer available.');if(isDemo(offer))throw new ApiError(400,'This is a demo listing and cannot be ordered.');const oid=id();await db.run('INSERT INTO orders (id,user_id,offer_id,domain,marketplace,price,content,target_url,anchor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[oid,user.id,offer.id,offer.domain,offer.marketplace,offer.price,d.content,d.target_url,d.anchor,now()]);return json({id:oid},201);}
     }
     const orderMatch=path.match(/^\/api\/orders\/([^/]+)(?:\/(checkout))?$/);
     if(orderMatch){const order=await own(db,'orders',orderMatch[1],user);
@@ -284,7 +285,8 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         collections.monitor_group_history=await db.all('SELECT h.* FROM monitor_group_history h JOIN monitor_groups g ON g.id=h.group_id WHERE g.user_id=? ORDER BY h.created_at DESC LIMIT 100',[uid]);
         return json({account,collections});
       }
-      if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n,submissions:(await db.first("SELECT COUNT(*) AS n FROM publisher_submissions WHERE status='pending'"))!.n});
+      if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n,submissions:(await db.first("SELECT COUNT(*) AS n FROM publisher_submissions WHERE status='pending'"))!.n,demo:await demoCount(db)});
+      if(path==='/api/admin/demo'&&method==='POST'){const d=await body(request,z.object({action:z.enum(['load','clear'])}));if(d.action==='load')await loadDemo(db);else await clearDemo(db);return json({demo:await demoCount(db)});}
       if(path==='/api/admin/submissions'&&method==='GET')return json({rows:await db.all("SELECT * FROM publisher_submissions ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,created_at DESC LIMIT 200")});
       const submissionMatch=path.match(/^\/api\/admin\/submissions\/([^/]+)$/);
       if(submissionMatch&&method==='PATCH'){

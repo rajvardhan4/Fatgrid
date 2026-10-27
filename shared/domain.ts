@@ -25,3 +25,6 @@ export function csvCell(value: unknown) {
   if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
 }
+// Sample listings that show how the marketplace looks. Marked everywhere and never orderable.
+export const DEMO_SOURCE = 'Demo sample';
+export const isDemo = (row: { metrics_source?: string; marketplace?: string } | null | undefined) => row?.metrics_source === DEMO_SOURCE || row?.marketplace === DEMO_SOURCE;
