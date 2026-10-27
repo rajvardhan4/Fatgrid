@@ -21,3 +21,27 @@ html{scrollbar-gutter:stable}::-webkit-scrollbar{width:10px;height:8px}::-webkit
 .demo-badge{display:inline-block;margin-left:6px;padding:0 6px;border-radius:4px;background:#fff4d6;color:#8a5a00;font-size:10px;font-weight:600;line-height:16px;vertical-align:middle}
 .demo-notice{margin:0 0 12px;padding:10px 14px;border:1px solid #f2d48a;border-radius:6px;background:#fffaf0;color:#5c4300;font-size:12px}
 .demo-admin{margin-bottom:16px}
+.publisher-table .group-row th{height:auto;padding:12px 12px 0;border-bottom:0;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.03em;text-align:left}
+.publisher-table .group-start{border-left:1px solid var(--line)}
+.publisher-table .table-sort{text-decoration:underline;text-underline-offset:4px;text-decoration-color:#b9b9c0;color:var(--ink);font-weight:500}
+.publisher-table td{height:64px;vertical-align:middle}
+.publisher-table th.numeric,.publisher-table td.numeric{text-align:right}
+.publisher-table th.numeric .table-sort{margin-left:auto}
+.publisher-table .selection{width:40px}
+.publisher-name{font-size:14px;font-weight:500;color:var(--ink);padding:0;min-height:0}
+.publisher-table .publisher-actions{display:flex;align-items:center;gap:5px;margin-top:6px}
+.publisher-table .publisher-actions button{padding:0;min-height:0;color:#8f8f96}
+.publisher-table .publisher-actions .boxed{width:19px;height:19px;border:1px solid #dadadf;border-radius:4px;background:white}
+.publisher-table .publisher-actions .more{width:19px;height:19px}
+.publisher-table .publisher-actions .is-set{color:var(--accent);border-color:var(--accent)}
+.publisher-table .publisher-actions a{display:inline-flex;color:#8f8f96}
+.publisher-table .action-gap{width:10px}
+.price-link{font-size:15px;font-weight:600;color:var(--ink);padding:0;min-height:0;border:0;background:none}
+.offers-pill{display:inline-flex;align-items:center;gap:7px;padding:7px 15px;min-height:0;border:0;border-radius:999px;background:var(--accent);color:white;font-size:13px;font-weight:600;white-space:nowrap}
+.offers-pill:hover{background:#1d2d5a}
+.chip-list{display:flex;flex-wrap:wrap;gap:5px;max-width:260px}
+.type-badge{display:inline-block;padding:2px 8px;border:1px solid #d6d6dc;border-radius:5px;background:#f4f4f6;font-size:12px;font-weight:500;white-space:nowrap}
+.category-chip{display:inline-block;padding:2px 9px;border:1px solid #e1e1e6;border-radius:999px;font-size:12px;white-space:nowrap}
+.cell-title{display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.num{font-family:'Geist Mono',monospace;font-size:13px}
+.q-mark{font-size:10px;font-weight:700;line-height:1}

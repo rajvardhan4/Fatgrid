@@ -66,7 +66,7 @@ export async function refund(db:Database,job:string,error:string){await db.batch
   {sql:"UPDATE jobs SET status='failed',error=?,finished_at=? WHERE id=? AND status='running'",args:[error,now(),job]},
 ]);}
 export async function recoverStaleJobs(db:Database){const cutoff=new Date(Date.now()-5*60000).toISOString();const rows=await db.all("SELECT id FROM jobs WHERE status='running' AND created_at<? AND NOT EXISTS (SELECT 1 FROM monitor_groups g WHERE g.job_id=jobs.id AND g.status IN ('running','processing') AND g.last_checked>?)",[cutoff,cutoff]);for(const row of rows)await refund(db,row.id,'Operation interrupted; units refunded.');}
-const inventorySelect='SELECT p.*,MIN(o.price) AS price,COUNT(o.id) AS offers,GROUP_CONCAT(DISTINCT o.follow) AS follow,MAX(o.sponsored) AS sponsored,MAX(o.restricted) AS restricted FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1';
+const inventorySelect='SELECT p.*,MIN(o.price) AS price,COUNT(o.id) AS offers,GROUP_CONCAT(DISTINCT o.type) AS types,GROUP_CONCAT(DISTINCT o.follow) AS follow,MAX(o.sponsored) AS sponsored,MAX(o.restricted) AS restricted FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1';
 async function inventory(db:Database,search:URLSearchParams){
   const where:string[]=['1=1'],args:unknown[]=[];
   for(const [param,column] of [['q','p.domain'],['keyword','p.title']] as const){const value=search.get(param);if(value){where.push(`${column} LIKE ?`);args.push('%'+value+'%')}}
