@@ -174,3 +174,58 @@ th{background:var(--selection);color:var(--accent);font-weight:600;font-size:13p
 input::placeholder,textarea::placeholder{color:var(--faint)}
 .segmented button{color:var(--faint)}
 @media(max-width:600px){h1,.finder h1{font-size:22px}}
+/* Layout: the sidebar and the top bar float as rounded cards on the page background, and each page opens with a heading banner. */
+:root{--sidebar:248px;--gap:16px}
+aside{top:var(--gap);left:var(--gap);bottom:var(--gap);border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 30px #0613220d;overflow:hidden}
+.shell{margin-left:calc(var(--sidebar) + var(--gap)*2)}
+.shell>header{margin:var(--gap) var(--gap) 0 0;top:var(--gap);height:60px;border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 30px #0613220d;padding:0 16px}
+.shell>main{padding:20px var(--gap) 32px 0}
+.shell>footer{margin:0 var(--gap) var(--gap) 0;border:1px solid var(--line);border-radius:14px}
+.brand{height:72px;padding:16px 18px}
+aside nav{padding:6px 12px 12px}
+.nav-label{height:auto;padding:16px 10px 8px;text-transform:uppercase}
+.nav-item{height:42px;padding:0 12px;border-radius:10px;margin-bottom:2px}
+.nav-item.active{font-weight:700}
+.nav-item.active:before{left:-12px;top:9px;bottom:9px;width:4px;border-radius:0 4px 4px 0}
+.sidebar-bottom{margin:12px;border:0;border-radius:14px;background:var(--selection);padding:14px}
+.sidebar-bottom .avatar{background:var(--accent);color:#fff;width:34px;height:34px;font-weight:700}
+.account-name b{font-size:14px;font-weight:700}
+.account-name small{font-size:12px;color:var(--muted)}
+.admin-link{font-size:12px;font-weight:600}
+.collapsed{--sidebar:72px}
+.collapsed .brand{padding:22px 0;justify-content:center}
+.collapsed aside nav{padding:6px 8px}
+.collapsed .nav-item.active:before{left:-8px}
+.page-heading,main>h1,.finder-page>h1,main>h1+.subtitle,main>h1+.count,.finder-page>h1+.subtitle{background:#061322;border-left:5px solid var(--accent)}
+.page-heading{align-items:center;padding:26px 30px;border-radius:16px;margin:0 0 20px;color:#fff}
+.page-heading h1,main>h1,.finder-page>h1{color:#fff;margin:0}
+.page-heading .subtitle,.page-heading .muted{color:#ffffffb3}
+main>h1,.finder-page>h1{padding:26px 30px 4px;border-radius:16px 16px 0 0}
+main>h1+.subtitle,main>h1+.count,.finder-page>h1+.subtitle{color:#ffffffb3;font-size:14px;padding:5px 30px 26px;border-radius:0 0 16px 16px;margin:-1px 0 20px}
+main>h1:not(:has(+.subtitle,+.count)),.finder-page>h1:not(:has(+.subtitle)){padding-bottom:26px;border-radius:16px;margin-bottom:20px}
+.reference-notice+.finder-page,.finder-page{padding:0}
+.reference-notice{border-radius:12px}
+/* Marketplaces: roomier filter panel and rounded cards. */
+.filters{border-radius:14px;overflow:hidden}
+.filters>div{padding:16px 16px 18px}
+.filters label{font-size:12px;font-weight:600;color:var(--ink)}
+.filters input,.filters select{font-size:13px;min-height:36px;padding:6px 10px;border-radius:8px}
+.filters .segmented.small button{font-size:12px;min-height:34px}
+.filter-top .search-box{border-radius:10px}
+section.results,.table-wrap{border-radius:14px}
+.table-toolbar{margin-top:14px}
+@media(max-width:1440px) and (min-width:961px){.filters{grid-template-columns:repeat(3,minmax(0,1fr))}.filters>div:nth-child(3){border-right:0}.filters>div:nth-child(n+4){border-top:1px solid var(--line)}}
+/* Form buttons sit apart from the field above them. */
+fieldset>button,fieldset>.button,fieldset>.inline-actions{margin-top:18px}
+@media(max-width:960px){
+:root{--gap:0px}
+aside{top:0;left:0;bottom:0;border-radius:0 18px 18px 0}
+.shell{margin-left:0}
+.shell>header{margin:0;top:0;border-width:0 0 1px;border-radius:0;box-shadow:none}
+.shell>main{padding:18px 14px 28px}
+.shell>footer{margin:0;border-width:1px 0 0;border-radius:0}
+.page-heading{flex-direction:column;align-items:flex-start;padding:20px}
+main>h1,.finder-page>h1{padding:20px 20px 4px}
+main>h1+.subtitle,main>h1+.count,.finder-page>h1+.subtitle{padding:5px 20px 20px}
+main>h1:not(:has(+.subtitle,+.count)),.finder-page>h1:not(:has(+.subtitle)){padding-bottom:20px}
+}

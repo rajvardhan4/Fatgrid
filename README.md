@@ -29,6 +29,8 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
+If `.env.local` holds the live database settings, run `npx tsx scripts/dev-local.ts` instead of `npm run dev`: it ignores the live MySQL and site address, uses `data/fatgrid.sqlite`, and loads the demo listings on first run.
+
 Open http://localhost:3000 or http://127.0.0.1:3000. The API listens on 127.0.0.1:3001. Local data stays in `data/fatgrid.sqlite` and is excluded from Git and deployment. Register your own local account. To administer imported offers and fulfillment, grant that existing account access from the local terminal:
 
 ```powershell
