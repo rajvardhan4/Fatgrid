@@ -41,7 +41,17 @@ Each feature stays switched off, with a clear message in the app, until its vari
 | Log in with Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console > APIs & Services > Credentials > OAuth client ID (Web application). Authorized redirect URI: `https://fatgrid-ebon.vercel.app/api/auth/google/callback/` (keep the final slash). |
 | Scheduled backlink monitoring | `CRON_SECRET` | Any long random string. `vercel.json` already runs a daily Vercel Cron at 06:00 UTC that sends it to `/api/internal/tick/`. |
 | Google / Backlinks / AI search | `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `PERPLEXITY_API_KEY` | DataForSEO and Perplexity accounts with balance. |
-| Paid plans and order payment | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_ADVANCED_PRICE_ID` | Stripe dashboard; webhook URL `/api/billing/webhook`. |
+| Paid plans and order payment | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_ADVANCED_PRICE_ID` | Stripe dashboard. See "Stripe setup" below. |
+
+### Stripe setup (plans and order payments)
+
+1. Stripe → Product catalog: create two products with a **monthly recurring** price: Pro ($34) and Advanced ($199). Copy each price ID (`price_...`) into `STRIPE_PRO_PRICE_ID` and `STRIPE_ADVANCED_PRICE_ID`.
+2. Stripe → Developers → API keys: copy the secret key into `STRIPE_SECRET_KEY` (use the `sk_test_...` key first to try everything with test cards).
+3. Stripe → Developers → Webhooks → Add endpoint: `https://fatgrid-ebon.vercel.app/api/billing/webhook` with the events `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`. Copy its signing secret (`whsec_...`) into `STRIPE_WEBHOOK_SECRET`.
+4. Stripe → Settings → Billing → Customer portal: save the portal settings once and allow customers to switch between the Pro and Advanced prices and to cancel. "Manage subscription" opens this portal.
+5. Redeploy. Pricing then shows "Choose Pro/Advanced" (Stripe Checkout). The plan and units change only when Stripe's signed webhook confirms the payment; a paying customer switches or cancels through the portal; a cancelled subscription returns the account to the free plan. Order drafts are paid with "Proceed to payment" and turn paid through the same webhook.
+
+Without these keys, Pricing says online payments are being set up and "Contact us to upgrade" opens a support request; nothing is charged.
 
 Database changes for these features (`password_resets`, `project_members`) are applied automatically on the first request after deployment (`mysql/0002_accounts_sharing.sql`).
 

@@ -140,3 +140,5 @@ button.kpi:not(:disabled):hover{border-color:var(--accent)}
 .customer-card h3 small{font-weight:400;margin-left:8px}
 .customer-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin:12px 0 0}
 .customer-facts dd{margin:2px 0 0;font-weight:500}
+.notice{margin:0 0 16px;padding:10px 14px;border:1px solid var(--line);border-radius:6px;background:#f7f8fb;font-size:13px}
+.notice.positive{border-color:#bfe3cc;background:#eef9f2;color:#157a44}

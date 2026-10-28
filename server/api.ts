@@ -6,7 +6,7 @@ import type { Database, Row, Statement } from './db';
 import { csvCell, isDemo, normalizeDomain, parseDomains, parseNiches } from '../shared/domain';
 import { clearDemo, demoCount, loadDemo } from './demo';
 import { inspectBacklink, providerStatus, publicURL, scanProvider, backlinkSummary, type PublicFetch } from './providers';
-import { checkout, stripeWebhook } from './billing';
+import { billingPortal, checkout, stripeWebhook } from './billing';
 import { groupApi, processGroups } from './monitoring';
 const json=(value:unknown,status=200,headers:Record<string,string>={})=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 const str=z.string().trim().min(1).max(300);
@@ -279,7 +279,12 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       try{await db.run('INSERT INTO scan_details (job_id,country,language,project_id,targets,model) VALUES (?,?,?,?,?,?)',[job,d.country,d.language,d.project_id||null,JSON.stringify(d.targets),d.kind==='ai'?'Perplexity Agent':'']);const result=await scanProvider(d.kind,d.query,d.country,d.depth,env,d.language);const rows:Row[]=[];for(const row of result.rows){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[row.domain]);rows.push({...row,...p,found:!!p,target:d.targets.includes(row.domain)});}const data={...result,rows,job};await finish(db,job,data,d.kind==='backlinks'?Math.max(0,cost-rows.length):0);return json(data);}catch(e){await refund(db,job,'Provider could not complete the scan.');throw e;}
     }
     if(path==='/api/usage'&&method==='GET')return json({user:safeUser(user),rows:await db.all('SELECT * FROM ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[user.id])});
-    if(path==='/api/billing/checkout'&&method==='POST'){const d=await body(request,z.object({plan:z.enum(['pro','advanced'])}));const price=d.plan==='pro'?env.STRIPE_PRO_PRICE_ID:env.STRIPE_ADVANCED_PRICE_ID;if(!price)throw new ApiError(503,'This plan is not connected to billing yet.');const session=await checkout(env,{mode:'subscription',client_reference_id:user.id,'metadata[user_id]':user.id,'subscription_data[metadata][user_id]':user.id,'line_items[0][price]':price,'line_items[0][quantity]':'1',customer_email:user.email,success_url:`${env.APP_ORIGIN||url.origin}/pricing/?checkout=success`,cancel_url:`${env.APP_ORIGIN||url.origin}/pricing/`});return json({url:session.url});}
+    if(path==='/api/billing/checkout'&&method==='POST'){const d=await body(request,z.object({plan:z.enum(['pro','advanced'])}));const origin=env.APP_ORIGIN||url.origin;
+      // A customer who already pays switches or cancels in the Stripe portal, never through a second subscription.
+      if(user.stripe_subscription&&user.stripe_customer&&user.plan!=='start')return json({url:(await billingPortal(env,user.stripe_customer,origin+'/pricing/')).url,portal:true});
+      const price=d.plan==='pro'?env.STRIPE_PRO_PRICE_ID:env.STRIPE_ADVANCED_PRICE_ID;if(env.STRIPE_SECRET_KEY&&!price)throw new ApiError(503,'This plan is not connected to billing yet.','provider_unavailable');
+      const session=await checkout(env,{mode:'subscription',client_reference_id:user.id,'metadata[user_id]':user.id,'subscription_data[metadata][user_id]':user.id,'line_items[0][price]':price||'','line_items[0][quantity]':'1',...(user.stripe_customer?{customer:user.stripe_customer}:{customer_email:user.email}),allow_promotion_codes:'true',success_url:`${origin}/pricing/?checkout=success`,cancel_url:`${origin}/pricing/?checkout=cancelled`});return json({url:session.url});}
+    if(path==='/api/billing/portal'&&method==='POST'){if(!user.stripe_customer)throw new ApiError(400,'There is no paid subscription on this account yet.');return json({url:(await billingPortal(env,user.stripe_customer,(env.APP_ORIGIN||url.origin)+'/pricing/')).url});}
     if(path.startsWith('/api/admin/')){
       admin(user);
       if(path==='/api/admin/users'&&method==='GET'){
