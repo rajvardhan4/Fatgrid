@@ -31,6 +31,17 @@ const submissionSchema=z.object({domain,title:z.string().trim().max(200).default
 const metric=(max?:number)=>z.preprocess(v=>v===''||v==null?null:v,z.coerce.number({error:'Enter a whole number, e.g. 45 or 10.5K.'}).int('Enter a whole number.').min(0,'Cannot be negative.').max(max??Number.MAX_SAFE_INTEGER,`Must be ${max} or less.`).nullable()).optional().transform(v=>v??null);
 const inventoryRow=z.object({domain,marketplace:z.string().trim().max(300).optional().transform(v=>v||'Own inventory'),price:z.coerce.number({error:'Enter the price as a number, e.g. 150 or $150.'}).positive('Price must be more than 0.').max(1000000,'Price must be $1,000,000 or less.'),type:z.enum(['Guest Post','Link Insertion']).default('Guest Post'),title:z.string().max(500).default(''),category:z.string().max(300).default(''),country:z.string().max(100).default(''),language:z.string().max(100).default('English'),authority:metric(100),dr:metric(100),traffic:metric(),referring_domains:metric(),traffic_top:metric(),all_traffic_top:metric(),all_traffic:metric(),monthly_min:metric(),follow:z.enum(['dofollow','nofollow']).default('dofollow'),sponsored:z.coerce.number().min(0).max(1).default(0),restricted:z.coerce.number().min(0).max(1).default(0),url:z.union([publicUrl,z.literal('')]).default(''),metrics_source:z.string().max(100).default('Imported'),niches:z.string().max(300).default('').transform(parseNiches)});
 const inventoryColumns=['domain','marketplace','price','type','title','category','language','country','authority','dr','traffic','referring_domains','traffic_top','all_traffic_top','all_traffic','monthly_min','follow','sponsored','restricted','niches','url','metrics_source'];
+// Each source yields the same columns: type, at, user_id and four details (a–d) that the admin UI describes.
+const activitySources:Record<string,string>={
+ signup:"SELECT 'signup' AS type,created_at AS at,id AS user_id,plan AS a,role AS b,NULL AS c,NULL AS d FROM users",
+ job:"SELECT 'job' AS type,created_at AS at,user_id,kind AS a,status AS b,cost AS c,SUBSTR(query,1,300) AS d FROM jobs",
+ project:"SELECT 'project' AS type,created_at AS at,user_id,name AS a,domain AS b,NULL AS c,NULL AS d FROM projects",
+ order:"SELECT 'order' AS type,created_at AS at,user_id,domain AS a,status AS b,price AS c,marketplace AS d FROM orders",
+ support:"SELECT 'support' AS type,created_at AS at,user_id,subject AS a,status AS b,NULL AS c,NULL AS d FROM support_requests",
+ quote:"SELECT 'quote' AS type,created_at AS at,user_id,domain AS a,status AS b,price AS c,link_type AS d FROM quote_requests",
+ monitor:"SELECT 'monitor' AS type,created_at AS at,user_id,name AS a,status AS b,NULL AS c,NULL AS d FROM monitor_groups",
+ listing:"SELECT 'listing' AS type,created_at AS at,user_id,domain AS a,status AS b,guest_post_price AS c,contact_email AS d FROM publisher_submissions",
+};
 // Approving a submission lists it as "Direct from publisher" offers. Existing publisher metrics are kept.
 function approvalStatements(s:Row):Statement[]{
  const offers=([['Guest Post',s.guest_post_price],['Link Insertion',s.link_insertion_price]] as const).filter(([,price])=>price!=null);
@@ -286,7 +297,33 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         collections.messages=await db.all('SELECT m.* FROM messages m JOIN support_requests r ON r.id=m.request_id WHERE r.user_id=? ORDER BY m.created_at DESC LIMIT 100',[uid]);
         collections.monitor_checks=await db.all('SELECT c.* FROM monitor_checks c JOIN monitors m ON m.id=c.monitor_id WHERE m.user_id=? ORDER BY c.created_at DESC LIMIT 100',[uid]);
         collections.monitor_group_history=await db.all('SELECT h.* FROM monitor_group_history h JOIN monitor_groups g ON g.id=h.group_id WHERE g.user_id=? ORDER BY h.created_at DESC LIMIT 100',[uid]);
-        return json({account,collections});
+        const count=async(sql:string)=>Number((await db.first(sql,[uid]))?.n||0);
+        const summary={projects:await count('SELECT COUNT(*) AS n FROM projects WHERE user_id=?'),priceChecks:await count("SELECT COUNT(*) AS n FROM jobs WHERE user_id=? AND kind='price-check'"),scans:await count("SELECT COUNT(*) AS n FROM jobs WHERE user_id=? AND kind IN ('google','ai','backlinks')"),monitors:await count('SELECT COUNT(*) AS n FROM monitor_groups WHERE user_id=?'),orders:await count('SELECT COUNT(*) AS n FROM orders WHERE user_id=?'),support:await count('SELECT COUNT(*) AS n FROM support_requests WHERE user_id=?'),unitsUsed:await count('SELECT COALESCE(SUM(-amount),0) AS n FROM ledger WHERE user_id=? AND amount<0'),lastActive:(await db.first('SELECT MAX(created_at) AS at FROM jobs WHERE user_id=?',[uid]))?.at||null};
+        return json({account,collections,summary});
+      }
+      if(path==='/api/admin/overview'&&method==='GET'){
+        const since=(days:number)=>new Date(Date.now()-days*86400000).toISOString(),day=since(1),week=since(7),month=since(30);
+        const n=async(sql:string,args:unknown[]=[])=>Number((await db.first(sql,args))?.n||0);
+        return json({
+          users:{total:await n('SELECT COUNT(*) AS n FROM users'),today:await n('SELECT COUNT(*) AS n FROM users WHERE created_at>=?',[day]),week:await n('SELECT COUNT(*) AS n FROM users WHERE created_at>=?',[week]),activeWeek:await n('SELECT COUNT(DISTINCT user_id) AS n FROM jobs WHERE created_at>=?',[week])},
+          usage:{priceChecks:await n("SELECT COUNT(*) AS n FROM jobs WHERE kind='price-check'"),priceChecksWeek:await n("SELECT COUNT(*) AS n FROM jobs WHERE kind='price-check' AND created_at>=?",[week]),scans:await n("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('google','ai','backlinks')"),monitors:await n('SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0'),unitsWeek:await n('SELECT COALESCE(SUM(-amount),0) AS n FROM ledger WHERE amount<0 AND created_at>=?',[week])},
+          projects:await n('SELECT COUNT(*) AS n FROM projects WHERE archived=0'),
+          orders:{total:await n('SELECT COUNT(*) AS n FROM orders'),drafts:await n("SELECT COUNT(*) AS n FROM orders WHERE status='draft'"),paid:await n("SELECT COUNT(*) AS n FROM orders WHERE status IN ('paid','in_progress','published')"),revenue:await n("SELECT COALESCE(SUM(price),0) AS n FROM orders WHERE status IN ('paid','in_progress','published')")},
+          support:{open:await n("SELECT COUNT(*) AS n FROM support_requests WHERE status='open'")},
+          listings:{pending:await n("SELECT COUNT(*) AS n FROM publisher_submissions WHERE status='pending'")},
+          topUsers:await db.all('SELECT u.id,u.email,u.name,u.plan,COUNT(j.id) AS jobs,MAX(j.created_at) AS last_active FROM jobs j JOIN users u ON u.id=j.user_id WHERE j.created_at>=? GROUP BY u.id,u.email,u.name,u.plan ORDER BY jobs DESC LIMIT 5',[month]),
+        });
+      }
+      // One timeline of what every customer did, newest first; filter by kind, customer or email.
+      if(path==='/api/admin/activity'&&method==='GET'){
+        const type=url.searchParams.get('type')||'',uid=url.searchParams.get('user')||'',search=(url.searchParams.get('search')||'').slice(0,254),page=Math.max(1,Math.min(10000,Number(url.searchParams.get('page'))||1)),size=50;
+        const parts=Object.entries(activitySources).filter(([k])=>!type||k===type).map(([,sql])=>sql);
+        if(!parts.length)throw new ApiError(400,'Unknown activity type.');
+        const where:string[]=[],args:unknown[]=[];
+        if(uid){where.push('e.user_id=?');args.push(uid)}
+        if(search){where.push('(u.email LIKE ? OR u.name LIKE ?)');args.push('%'+search+'%','%'+search+'%')}
+        const rows=await db.all(`SELECT e.*,u.email,u.name FROM (${parts.join(' UNION ALL ')}) e LEFT JOIN users u ON u.id=e.user_id${where.length?' WHERE '+where.join(' AND '):''} ORDER BY e.at DESC LIMIT ? OFFSET ?`,[...args,size+1,(page-1)*size]);
+        return json({rows:rows.slice(0,size),page,more:rows.length>size});
       }
       if(path==='/api/admin/status')return json({providers:providerStatus(env),publishers:(await db.first('SELECT COUNT(*) AS n FROM publishers'))!.n,offers:(await db.first('SELECT COUNT(*) AS n FROM offers'))!.n,users:(await db.first('SELECT COUNT(*) AS n FROM users'))!.n,submissions:(await db.first("SELECT COUNT(*) AS n FROM publisher_submissions WHERE status='pending'"))!.n,demo:await demoCount(db)});
       if(path==='/api/admin/demo'&&method==='POST'){const d=await body(request,z.object({action:z.enum(['load','clear'])}));if(d.action==='load')await loadDemo(db);else await clearDemo(db);return json({demo:await demoCount(db)});}
