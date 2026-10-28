@@ -41,6 +41,7 @@ const activitySources:Record<string,string>={
  support:"SELECT 'support' AS type,created_at AS at,user_id,subject AS a,status AS b,NULL AS c,NULL AS d FROM support_requests",
  quote:"SELECT 'quote' AS type,created_at AS at,user_id,domain AS a,status AS b,price AS c,link_type AS d FROM quote_requests",
  monitor:"SELECT 'monitor' AS type,created_at AS at,user_id,name AS a,status AS b,NULL AS c,NULL AS d FROM monitor_groups",
+ plan:"SELECT 'plan' AS type,created_at AS at,user_id,reason AS a,NULL AS b,amount AS c,NULL AS d FROM ledger WHERE reason LIKE 'plan %'",
  listing:"SELECT 'listing' AS type,created_at AS at,user_id,domain AS a,status AS b,guest_post_price AS c,contact_email AS d FROM publisher_submissions",
 };
 // Approving a submission lists it as "Direct from publisher" offers. Existing publisher metrics are kept.
@@ -302,7 +303,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       }
       const adminUser=path.match(/^\/api\/admin\/users\/([^/]+)$/);
       if(adminUser&&method==='GET'){
-        const uid=adminUser[1],account=await db.first('SELECT id,email,name,role,plan,units,created_at FROM users WHERE id=?',[uid]);
+        const uid=adminUser[1],account=await db.first('SELECT id,email,name,role,plan,units,period,created_at,CASE WHEN stripe_subscription IS NULL THEN 0 ELSE 1 END AS stripe FROM users WHERE id=?',[uid]);
         if(!account)throw new ApiError(404,'User not found.');
         const collections:Record<string,Row[]>={};
         for(const table of ['projects','orders','support_requests','jobs','ledger','monitors','monitor_groups','publisher_decisions','quote_requests'])collections[table]=await db.all(`SELECT * FROM ${table} WHERE user_id=? LIMIT 100`,[uid]);
@@ -313,6 +314,19 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         const count=async(sql:string)=>Number((await db.first(sql,[uid]))?.n||0);
         const summary={projects:await count('SELECT COUNT(*) AS n FROM projects WHERE user_id=?'),priceChecks:await count("SELECT COUNT(*) AS n FROM jobs WHERE user_id=? AND kind='price-check'"),scans:await count("SELECT COUNT(*) AS n FROM jobs WHERE user_id=? AND kind IN ('google','ai','backlinks')"),monitors:await count('SELECT COUNT(*) AS n FROM monitor_groups WHERE user_id=?'),orders:await count('SELECT COUNT(*) AS n FROM orders WHERE user_id=?'),support:await count('SELECT COUNT(*) AS n FROM support_requests WHERE user_id=?'),unitsUsed:await count('SELECT COALESCE(SUM(-amount),0) AS n FROM ledger WHERE user_id=? AND amount<0'),lastActive:(await db.first('SELECT MAX(created_at) AS at FROM jobs WHERE user_id=?',[uid]))?.at||null};
         return json({account,collections,summary});
+      }
+      // Manual billing: an admin sets the plan and refills its monthly units. Choosing the same plan again renews it.
+      if(adminUser&&method==='PATCH'){
+        const d=await body(request,z.object({plan:z.enum(['start','pro','advanced'])}));
+        const account=await db.first('SELECT id,plan,units,stripe_subscription FROM users WHERE id=?',[adminUser[1]]);
+        if(!account)throw new ApiError(404,'User not found.');
+        if(account.stripe_subscription)throw new ApiError(409,'This customer pays through Stripe. They can change the plan from Pricing → Manage subscription.','stripe_managed');
+        const units=limits[d.plan].units;
+        await db.batch([
+         {sql:'UPDATE users SET plan=?,units=?,period=? WHERE id=?',args:[d.plan,units,month(),account.id]},
+         {sql:'INSERT INTO ledger (id,user_id,amount,reason,created_at) VALUES (?,?,?,?,?)',args:[id(),account.id,units-Number(account.units),`plan ${d.plan} by ${user.email}`,now()]},
+        ]);
+        return json({account:await db.first('SELECT id,email,name,role,plan,units,period,created_at,0 AS stripe FROM users WHERE id=?',[account.id])});
       }
       if(path==='/api/admin/overview'&&method==='GET'){
         const since=(days:number)=>new Date(Date.now()-days*86400000).toISOString(),day=since(1),week=since(7),month=since(30);

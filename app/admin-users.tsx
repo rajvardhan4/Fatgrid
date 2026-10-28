@@ -1,23 +1,25 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {request,date,money,Empty,type Row} from './ui';
+import {request,post,date,money,Empty,type Row} from './ui';
 import {parseDomains} from '../shared/domain';
 // Opens a customer's page in the Users tab; the Users tab reads ?user= when it mounts.
 export function openCustomer(id:string,setTab:(t:string)=>void){history.replaceState(null,'','/admin/?tab=users&user='+encodeURIComponent(id));setTab('users');}
 const jobLabels:Record<string,string>={'price-check':'Ran a price check',google:'Ran a Google scan',ai:'Ran an AI search',backlinks:'Fetched referring domains',monitor:'Checked a backlink','monitor-group':'Ran a backlink check',export:'Exported a CSV'};
+const planNames:Record<string,[string,number]>={start:['Start (free)',10],pro:['Pro',10000],advanced:['Advanced',500000]};
 // Turns one activity row (type, a–d) into a sentence an admin can read.
 export function describe(e:Row){
- if(e.type==='signup')return {what:'Signed up',detail:`${e.a} plan${e.b==='admin'?' · admin':''}`};
+ if(e.type==='signup')return {what:'Signed up',detail:`now on ${planNames[e.a]?.[0]||e.a}${e.b==='admin'?' · admin':''}`};
  if(e.type==='job'){const domains=e.a==='price-check'?parseDomains(e.d||'').domains.map(x=>x.domain):[];return {what:jobLabels[e.a]||e.a,detail:(domains.length?domains.slice(0,4).join(', ')+(domains.length>4?` +${domains.length-4} more`:''):e.d?`“${String(e.d).slice(0,80)}”`:'')+` · ${e.c??0} units`,status:e.b};}
  if(e.type==='project')return {what:`Created project “${e.a}”`,detail:e.b||''};
  if(e.type==='order')return {what:`Placed an order on ${e.a}`,detail:`${money(e.c)}${e.d?' · '+e.d:''}`,status:e.b};
  if(e.type==='support')return {what:`Opened support request “${e.a}”`,detail:'',status:e.b};
  if(e.type==='quote')return {what:`Asked for a price on ${e.a}`,detail:`${e.d||''}${e.c!=null?' · quoted '+money(e.c):''}`,status:e.b};
  if(e.type==='monitor')return {what:`Created backlink check “${e.a}”`,detail:'',status:e.b};
+ if(e.type==='plan'){const [,plan,,...by]=String(e.a).split(' '),c=Number(e.c)||0;return {what:`Plan set to ${planNames[plan]?.[0]||plan}`,detail:`by ${by.join(' ')} · ${c>=0?'+':''}${c.toLocaleString()} units`};}
  if(e.type==='listing')return {what:`Submitted ${e.a} for listing`,detail:`${e.c!=null?money(e.c)+' · ':''}${e.d||''}`,status:e.b};
  return {what:e.type,detail:''};
 }
-const activityTypes:[string,string][]=[['','All activity'],['signup','Sign-ups'],['job','Price checks & scans'],['project','Projects'],['order','Orders'],['support','Support'],['quote','Price requests'],['monitor','Backlink checks'],['listing','Publisher listings']];
+const activityTypes:[string,string][]=[['','All activity'],['signup','Sign-ups'],['job','Price checks & scans'],['project','Projects'],['order','Orders'],['support','Support'],['quote','Price requests'],['monitor','Backlink checks'],['listing','Publisher listings'],['plan','Plan changes']];
 export function AdminActivity({user,setTab,compact=false}:{user?:string,setTab:(t:string)=>void,compact?:boolean}){
  const [type,setType]=useState(''),[search,setSearch]=useState(''),[query,setQuery]=useState(''),[page,setPage]=useState(1),[data,setData]=useState<Row>({rows:[],more:false}),[error,setError]=useState(''),[loading,setLoading]=useState(true);
  useEffect(()=>{let active=true;setLoading(true);const q=new URLSearchParams({type,search:query,page:String(page),...(user?{user}:{})});request('/admin/activity?'+q).then(d=>{if(active){setData(d);setError('')}}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[type,query,page,user]);
@@ -54,19 +56,30 @@ export function AdminOverview({setTab}:{setTab:(t:string)=>void}){
   <AdminActivity setTab={setTab} compact/>
  </>;
 }
+// Manual billing until Stripe is connected: activate a plan after the customer pays, and renew it each month.
+function PlanControl({account,onSaved}:{account:Row,onSaved:()=>void}){
+ const [plan,setPlan]=useState<string>(account.plan),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState('');
+ if(account.stripe)return <p className="small-note muted">This customer pays through Stripe, so the plan follows their subscription.</p>;
+ const [name,units]=planNames[plan]||[plan,0],renew=plan===account.plan,free=plan==='start';
+ async function save(){setBusy(true);setError('');setMessage('');try{await post('/admin/users/'+encodeURIComponent(account.id),{plan},'PATCH');setMessage(`${name} ${renew?'renewed':'activated'}: ${units.toLocaleString()} units for this month.`);onSaved()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+ return <div className="plan-control"><div className="section-bar"><label>Plan <select aria-label="Plan" value={plan} disabled={busy} onChange={e=>{setPlan(e.target.value);setMessage('')}}>{Object.entries(planNames).map(([k,[n,u]])=><option key={k} value={k}>{n} · {u.toLocaleString()} units</option>)}</select></label><button className="primary" disabled={busy||(free&&renew)} onClick={save}>{free?(renew?'Current plan':'Move to free plan'):renew?`Renew ${name}`:`Activate ${name}`}</button></div>
+  <p className="small-note muted">{free?'The free plan has 10 units a month, refilled automatically.':`Use this after the customer has paid. It sets their units to ${units.toLocaleString()} for this month. Plans set here do not renew on their own: when they pay again next month, click Renew.`}</p>
+  {message&&<div className="notice positive" role="status">{message}</div>}{error&&<div className="error" role="alert">{error}</div>}</div>;
+}
 export function AdminUsers({setTab}:{setTab:(t:string)=>void}){
- const [search,setSearch]=useState(''),[query,setQuery]=useState(''),[page,setPage]=useState(1),[data,setData]=useState<Row>({rows:[],total:0}),[detail,setDetail]=useState<Row|null>(null),[section,setSection]=useState('projects'),[error,setError]=useState(''),[loading,setLoading]=useState(false);
- useEffect(()=>{let active=true;setLoading(true);setError('');request('/admin/users?search='+encodeURIComponent(query)+'&page='+page).then(d=>{if(active)setData(d)}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[query,page]);
+ const [search,setSearch]=useState(''),[query,setQuery]=useState(''),[page,setPage]=useState(1),[data,setData]=useState<Row>({rows:[],total:0}),[detail,setDetail]=useState<Row|null>(null),[section,setSection]=useState('projects'),[error,setError]=useState(''),[loading,setLoading]=useState(false),[version,setVersion]=useState(0);
+ useEffect(()=>{let active=true;setLoading(true);setError('');request('/admin/users?search='+encodeURIComponent(query)+'&page='+page).then(d=>{if(active)setData(d)}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[query,page,version]);
  useEffect(()=>{const id=new URLSearchParams(location.search).get('user');if(id)open(id)},[]);
  async function open(id:string){setLoading(true);setError('');try{setDetail(await request('/admin/users/'+encodeURIComponent(id)));setSection('projects');history.replaceState(null,'','/admin/?tab=users&user='+encodeURIComponent(id))}catch(e){setError((e as Error).message)}finally{setLoading(false)}}
+ async function refresh(id:string){setVersion(v=>v+1);try{setDetail(await request('/admin/users/'+encodeURIComponent(id)))}catch(e){setError((e as Error).message)}}
  function close(){setDetail(null);history.replaceState(null,'','/admin/?tab=users')}
  const labels:Record<string,string>={projects:'Projects',project_domains:'Project domains',messages:'Messages',monitor_checks:'Backlink history',monitor_group_history:'Group history',orders:'Orders',support_requests:'Support requests',jobs:'Scans',ledger:'Unit history',monitors:'Backlinks',monitor_groups:'Monitor groups',publisher_decisions:'Saved publishers',quote_requests:'Quotes'};
  if(detail){const a=detail.account,s=detail.summary||{};return <>{error&&<div className="error" role="alert">{error}</div>}
   <button onClick={close}>← All customers</button>
-  <section className="settings-card customer-card"><h3>{a.name} <small className="muted">{a.email}</small></h3><dl className="customer-facts">{[['Plan',a.plan],['Role',a.role],['Units left',a.units],['Joined',date(a.created_at)],['Last active',date(s.lastActive)]].map(([k,v])=><div key={k as string}><dt>{k}</dt><dd>{v??'—'}</dd></div>)}</dl></section>
+  <section className="settings-card customer-card"><h3>{a.name} <small className="muted">{a.email}</small></h3><dl className="customer-facts">{[['Plan',a.plan],['Role',a.role],['Units left',a.units],['Joined',date(a.created_at)],['Last active',date(s.lastActive)]].map(([k,v])=><div key={k as string}><dt>{k}</dt><dd>{v??'—'}</dd></div>)}</dl><PlanControl key={a.id} account={a} onSaved={()=>refresh(a.id)}/></section>
   <div className="kpi-grid">{[['Price checks',s.priceChecks],['Scans',s.scans],['Projects',s.projects],['Backlink checks',s.monitors],['Orders',s.orders],['Support requests',s.support],['Units used',s.unitsUsed]].map(([k,v])=><div className="kpi" key={k as string}><span>{k}</span><b>{(v??0).toLocaleString()}</b></div>)}</div>
   <h3 className="section-title">What {a.name} did</h3>
-  <AdminActivity user={a.id} setTab={setTab}/>
+  <AdminActivity key={version} user={a.id} setTab={setTab}/>
   <h3 className="section-title">All records</h3>
   <label className="section-bar">Category<select aria-label="Account record category" value={section} onChange={e=>setSection(e.target.value)}>{Object.entries(labels).map(([key,label])=><option key={key} value={key}>{label} ({detail.collections[key].length})</option>)}</select></label>
   <section className="results"><p className="small-note">Showing up to 100 records per category.</p>{detail.collections[section].length?<div className="table-wrap"><table><thead><tr>{Object.keys(detail.collections[section][0]).map(k=><th key={k}>{k.replaceAll('_',' ')}</th>)}</tr></thead><tbody>{detail.collections[section].map((r:Row,i:number)=><tr key={r.id||i}>{Object.entries(r).map(([k,v])=><td key={k} style={{maxWidth:360,whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{v==null?'—':String(v)}</td>)}</tr>)}</tbody></table></div>:<Empty title="No records yet"/>}</section>
