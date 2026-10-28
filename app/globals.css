@@ -142,3 +142,5 @@ button.kpi:not(:disabled):hover{border-color:var(--accent)}
 .customer-facts dd{margin:2px 0 0;font-weight:500}
 .notice{margin:0 0 16px;padding:10px 14px;border:1px solid var(--line);border-radius:6px;background:#f7f8fb;font-size:13px}
 .notice.positive{border-color:#bfe3cc;background:#eef9f2;color:#157a44}
+.site-settings{margin-bottom:16px}
+.site-settings input[type=number]{max-width:140px}

@@ -5,6 +5,7 @@ import { googleAuthURL, googleConfigured, googleProfile } from './google';
 import type { Database, Row, Statement } from './db';
 import { csvCell, isDemo, normalizeDomain, parseDomains, parseNiches } from '../shared/domain';
 import { clearDemo, demoCount, loadDemo } from './demo';
+import { costFor, customerOrder, customerPrice, hideSource, loadSettings, saveSettings, sellOffer, sellRow, type Pricing } from './pricing';
 import { inspectBacklink, providerStatus, publicURL, scanProvider, backlinkSummary, type PublicFetch } from './providers';
 import { billingPortal, checkout, stripeWebhook } from './billing';
 import { groupApi, processGroups } from './monitoring';
@@ -81,11 +82,11 @@ export async function refund(db:Database,job:string,error:string){await db.batch
 ]);}
 export async function recoverStaleJobs(db:Database){const cutoff=new Date(Date.now()-5*60000).toISOString();const rows=await db.all("SELECT id FROM jobs WHERE status='running' AND created_at<? AND NOT EXISTS (SELECT 1 FROM monitor_groups g WHERE g.job_id=jobs.id AND g.status IN ('running','processing') AND g.last_checked>?)",[cutoff,cutoff]);for(const row of rows)await refund(db,row.id,'Operation interrupted; units refunded.');}
 const inventorySelect='SELECT p.*,MIN(o.price) AS price,COUNT(o.id) AS offers,GROUP_CONCAT(DISTINCT o.type) AS types,GROUP_CONCAT(DISTINCT o.follow) AS follow,MAX(o.sponsored) AS sponsored,MAX(o.restricted) AS restricted FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1';
-async function inventory(db:Database,search:URLSearchParams){
+async function inventory(db:Database,search:URLSearchParams,pricing:Pricing){
   const where:string[]=['1=1'],args:unknown[]=[];
   for(const [param,column] of [['q','p.domain'],['keyword','p.title']] as const){const value=search.get(param);if(value){where.push(`${column} LIKE ?`);args.push('%'+value+'%')}}
   for(const [param,column] of [['country','p.country'],['category','p.category'],['language','p.language'],['type','o.type'],['marketplace','o.marketplace'],['follow','o.follow']] as const){const value=search.get(param);if(value&&value!=='All'&&value!=='Any'){where.push(`${column}=?`);args.push(value)}}
-  for(const [param,column,op] of [['minPrice','o.price','>='],['maxPrice','o.price','<='],['minTraffic','p.traffic','>='],['maxTraffic','p.traffic','<='],['minDR','p.dr','>='],['maxDR','p.dr','<='],['minAS','p.authority','>='],['maxAS','p.authority','<=']] as const){const v=search.get(param);if(v!==null&&v!==''&&Number.isFinite(Number(v))){where.push(`${column}${op}?`);args.push(Number(v))}}
+  for(const [param,column,op] of [['minPrice','o.price','>='],['maxPrice','o.price','<='],['minTraffic','p.traffic','>='],['maxTraffic','p.traffic','<='],['minDR','p.dr','>='],['maxDR','p.dr','<='],['minAS','p.authority','>='],['maxAS','p.authority','<=']] as const){const v=search.get(param);if(v!==null&&v!==''&&Number.isFinite(Number(v))){where.push(`${column}${op}?`);args.push(column==='o.price'?costFor(Number(v),pricing.markup):Number(v))}}
   for(const key of ['sponsored','restricted']){const v=search.get(key);if(v==='0'||v==='1'){where.push(`o.${key}=?`);args.push(Number(v))}}
   const sorts:Record<string,string>={domain:'p.domain',price:'price',traffic:'p.traffic',authority:'p.authority',dr:'p.dr',offers:'offers'};
   const sort=sorts[search.get('sort')||'domain']||'p.domain',dir=search.get('direction')==='desc'?'DESC':'ASC';
@@ -93,7 +94,7 @@ async function inventory(db:Database,search:URLSearchParams){
   const condition=' WHERE '+where.join(' AND ');
   const count=await db.first('SELECT COUNT(DISTINCT p.domain) AS count FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1'+condition,args);
   const rows=await db.all(inventorySelect+condition+` GROUP BY p.domain ORDER BY ${sort} ${dir},p.domain ASC LIMIT ? OFFSET ?`,[...args,size,(page-1)*size]);
-  return {rows,total:count!.count,page,size};
+  return {rows:rows.map(r=>sellRow(r,pricing)),total:count!.count,page,size};
 }
 export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFetch):Promise<Response>{
   try{
@@ -104,7 +105,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       // authenticates service access before this shared, parameter-free updater runs.
       const privateDispatch=env.AUTH_MODE==='platform'&&env.PRIVATE_SCHEDULER==='1';
       if(!privateDispatch&&(!env.CRON_SECRET||!equal(request.headers.get('authorization')||'','Bearer '+env.CRON_SECRET)))throw new ApiError(401,'Unauthorized.');
-      await processGroups(db,env,safeFetch,40000);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
+      if(env.FEATURE_SCANNERS==='1'||(await loadSettings(db)).scanners)await processGroups(db,env,safeFetch,40000);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
     }
     if(path==='/api/billing/webhook'&&method==='POST')return json(await stripeWebhook(request,db,env));
     if(!['GET','HEAD','OPTIONS'].includes(method)){
@@ -116,7 +117,11 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       if(!request.headers.get('content-type')?.includes('application/json'))throw new ApiError(415,'Content-Type must be application/json.');
     }
     const user=await authenticate(request,db,env);
-    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start']});
+    let cached:Promise<Awaited<ReturnType<typeof loadSettings>>>|undefined;
+    const settings=()=>cached??=loadSettings(db);
+    const pricing=async():Promise<Pricing>=>({markup:(await settings()).markup,admin:user?.role==='admin'});
+    const scannersOn=async()=>env.FEATURE_SCANNERS==='1'||(await settings()).scanners;
+    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start'],features:{scanners:await scannersOn()}});
     if(path==='/api/health')return json({ok:!!await db.first('SELECT 1 AS ok'),database:'connected'});
     if(path.startsWith('/api/auth/')){
       if(env.AUTH_MODE==='platform')throw new ApiError(409,'Use the secure ChatGPT sign-in link on this hosted version.');
@@ -172,8 +177,8 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       }
       throw new ApiError(404,'Authentication route not found.');
     }
-    if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams));
-    if(path==='/api/inventory/options'&&method==='GET')return json({countries:await db.all("SELECT DISTINCT country AS value FROM publishers WHERE country<>'' ORDER BY country"),categories:await db.all("SELECT DISTINCT category AS value FROM publishers WHERE category<>'' ORDER BY category"),marketplaces:await db.all('SELECT DISTINCT marketplace AS value FROM offers ORDER BY marketplace')});
+    if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams,await pricing()));
+    if(path==='/api/inventory/options'&&method==='GET')return json({countries:await db.all("SELECT DISTINCT country AS value FROM publishers WHERE country<>'' ORDER BY country"),categories:await db.all("SELECT DISTINCT category AS value FROM publishers WHERE category<>'' ORDER BY category"),marketplaces:hideSource(await pricing())?[]:await db.all('SELECT DISTINCT marketplace AS value FROM offers ORDER BY marketplace')});
     if(path==='/api/submissions'&&method==='POST'){
       await rateLimit(db,'submit:'+(request.headers.get('x-client-ip')||'unknown'),5,3600000);
       const d=await body(request,submissionSchema);
@@ -181,9 +186,11 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       if(!d.website)await db.run('INSERT INTO publisher_submissions (id,domain,title,category,country,language,guest_post_price,link_insertion_price,follow,sponsored,restricted,niches,sample_url,contact_name,contact_email,notes,status,review_note,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[id(),d.domain,d.title,d.category,d.country,d.language||'English',d.guest_post_price,d.link_insertion_price,d.follow,Number(d.sponsored),Number(d.restricted||!!d.niches),d.niches,d.sample_url,d.contact_name,d.contact_email,d.notes,'pending','',user?.id||null,now()]);
       return json({ok:true},201);
     }
-    if(path==='/api/offers'&&method==='GET'){const d=normalizeDomain(url.searchParams.get('domain')||'');return json({publisher:await db.first('SELECT * FROM publishers WHERE domain=?',[d]),offers:await db.all('SELECT * FROM offers WHERE domain=? AND active=1 ORDER BY price,marketplace',[d])});}
+    if(path==='/api/offers'&&method==='GET'){const d=normalizeDomain(url.searchParams.get('domain')||''),p=await pricing();return json({publisher:await db.first('SELECT * FROM publishers WHERE domain=?',[d]),offers:(await db.all('SELECT * FROM offers WHERE domain=? AND active=1 ORDER BY price,marketplace',[d])).map(o=>sellOffer(o,p))});}
     requireUser(user);
     if(method!=='GET')await rateLimit(db,'write:'+user.id,100);
+    // Scanners (Google, AI, Backlinks Profile, Backlinks Monitoring) stay hidden until an admin switches them on.
+    if(!await scannersOn()&&(path==='/api/backlinks/lookup'||path.startsWith('/api/monitor-groups')||path.startsWith('/api/monitors')||(path==='/api/scans'&&method==='POST')))throw new ApiError(404,'This feature is not available yet.','feature_disabled');
     if(path==='/api/backlinks/lookup'&&method==='POST'){await rateLimit(db,'lookup:'+user.id,20,3600000);const d=await body(request,z.object({domain}));return json(await backlinkSummary(d.domain,env));}
     const grouped=await groupApi(request,db,env,safeFetch,user);if(grouped!==undefined)return json(grouped);
     if(path==='/api/preferences'){
@@ -206,12 +213,12 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     if(path==='/api/price-check'&&method==='POST'){
       const data=await body(request,z.object({text:z.string().min(1).max(100000)}));const parsed=parseDomains(data.text);
       if(!parsed.domains.length||parsed.domains.length>500)throw new ApiError(400,'Enter between 1 and 500 valid unique domains.');
-      const job=await reserve(db,user,'price-check',data.text,parsed.domains.length);
-      try{const rows:Row[]=[];for(const item of parsed.domains){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[item.domain]);rows.push({...item,...p,found:!!p,gap:p&&item.quoted!==null?Math.round((item.quoted-p.price)*100)/100:null});}const result={rows,invalid:parsed.invalid,job};await finish(db,job,result);return json(result);}catch(e){await refund(db,job,'Price check failed.');throw e;}
+      const job=await reserve(db,user,'price-check',data.text,parsed.domains.length),sale=await pricing();
+      try{const rows:Row[]=[];for(const item of parsed.domains){const found=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[item.domain]),p=found&&sellRow(found,sale);rows.push({...item,...p,found:!!p,gap:p&&item.quoted!==null?Math.round((item.quoted-p.price)*100)/100:null});}const result={rows,invalid:parsed.invalid,job};await finish(db,job,result);return json(result);}catch(e){await refund(db,job,'Price check failed.');throw e;}
     }
     if(path==='/api/export'&&method==='POST'){
       const data=await body(request,z.object({domains:z.array(domain).min(1).max(500)}));const ds=[...new Set(data.domains)];
-      const rows:Row[]=[];for(const d of ds){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[d]);if(p)rows.push(p)}
+      const rows:Row[]=[],sale=await pricing();for(const d of ds){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[d]);if(p)rows.push(sellRow(p,sale))}
       if(!rows.length)throw new ApiError(400,'Select publishers with available data to export.');const job=await reserve(db,user,'export',ds.join('\n'),rows.length);
       const csv=[['Publisher','Best Price','Offers','AS','DR','Country','Traffic'].map(csvCell).join(','),...rows.map(p=>[p.domain,p.price,p.offers,p.authority,p.dr,p.country,p.traffic].map(csvCell).join(','))].join('\r\n');await finish(db,job,{rows:rows.length});return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="publishers.csv"','Cache-Control':'no-store'}});
     }
@@ -237,8 +244,9 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     const domainMatch=path.match(/^\/api\/project-domains\/([^/]+)$/);
     if(domainMatch){const row=await db.first('SELECT * FROM project_domains WHERE id=?',[domainMatch[1]]);if(!row)throw new ApiError(404,'Domain not found.');await projectAccess(db,row.project_id,user,true).catch(e=>{throw e instanceof ApiError&&e.status===404?new ApiError(404,'Domain not found.'):e});if(method==='DELETE'){await db.run('DELETE FROM project_domains WHERE id=?',[row.id]);return json({ok:true});}if(method==='PATCH'){const d=await body(request,z.object({status:z.enum(['prospect','contacted','negotiating','ordered','published','rejected']),notes:z.string().max(5000)}));await db.run('UPDATE project_domains SET status=?,notes=? WHERE id=?',[d.status,d.notes,row.id]);return json({ok:true});}}
     if(path==='/api/orders'){
-      if(method==='GET')return json({rows:await db.all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC',[user.id])});
-      if(method==='POST'){const d=await body(request,z.object({offer_id:str,content:z.string().trim().min(20).max(100000),target_url:publicUrl,anchor:str}));const offer=await db.first('SELECT * FROM offers WHERE id=? AND active=1',[d.offer_id]);if(!offer)throw new ApiError(404,'Offer is no longer available.');if(isDemo(offer))throw new ApiError(400,'This is a demo listing and cannot be ordered.');const oid=id();await db.run('INSERT INTO orders (id,user_id,offer_id,domain,marketplace,price,content,target_url,anchor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[oid,user.id,offer.id,offer.domain,offer.marketplace,offer.price,d.content,d.target_url,d.anchor,now()]);return json({id:oid},201);}
+      if(method==='GET'){const p=await pricing();return json({rows:(await db.all('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC',[user.id])).map(o=>customerOrder(o,p))});}
+      if(method==='POST'){const d=await body(request,z.object({offer_id:str,content:z.string().trim().min(20).max(100000),target_url:publicUrl,anchor:str}));const offer=await db.first('SELECT * FROM offers WHERE id=? AND active=1',[d.offer_id]);if(!offer)throw new ApiError(404,'Offer is no longer available.');if(isDemo(offer))throw new ApiError(400,'This is a demo listing and cannot be ordered.');// The customer pays the marked-up price; the publisher cost is kept for the admin's margin.
+        const oid=id();await db.run('INSERT INTO orders (id,user_id,offer_id,domain,marketplace,price,cost,content,target_url,anchor,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[oid,user.id,offer.id,offer.domain,offer.marketplace,customerPrice(offer.price,(await pricing()).markup),offer.price,d.content,d.target_url,d.anchor,now()]);return json({id:oid},201);}
     }
     const orderMatch=path.match(/^\/api\/orders\/([^/]+)(?:\/(checkout))?$/);
     if(orderMatch){const order=await own(db,'orders',orderMatch[1],user);
@@ -276,7 +284,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       if(d.project_id)await projectAccess(db,d.project_id,user);
       const cost=d.kind==='ai'?10:d.kind==='google'?Math.ceil(d.depth/10):d.depth;
       const job=await reserve(db,user,d.kind,d.query,cost);
-      try{await db.run('INSERT INTO scan_details (job_id,country,language,project_id,targets,model) VALUES (?,?,?,?,?,?)',[job,d.country,d.language,d.project_id||null,JSON.stringify(d.targets),d.kind==='ai'?'Perplexity Agent':'']);const result=await scanProvider(d.kind,d.query,d.country,d.depth,env,d.language);const rows:Row[]=[];for(const row of result.rows){const p=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[row.domain]);rows.push({...row,...p,found:!!p,target:d.targets.includes(row.domain)});}const data={...result,rows,job};await finish(db,job,data,d.kind==='backlinks'?Math.max(0,cost-rows.length):0);return json(data);}catch(e){await refund(db,job,'Provider could not complete the scan.');throw e;}
+      try{await db.run('INSERT INTO scan_details (job_id,country,language,project_id,targets,model) VALUES (?,?,?,?,?,?)',[job,d.country,d.language,d.project_id||null,JSON.stringify(d.targets),d.kind==='ai'?'Perplexity Agent':'']);const result=await scanProvider(d.kind,d.query,d.country,d.depth,env,d.language);const rows:Row[]=[],sale=await pricing();for(const row of result.rows){const found=await db.first(inventorySelect+' WHERE p.domain=? GROUP BY p.domain',[row.domain]),p=found&&sellRow(found,sale);rows.push({...row,...p,found:!!p,target:d.targets.includes(row.domain)});}const data={...result,rows,job};await finish(db,job,data,d.kind==='backlinks'?Math.max(0,cost-rows.length):0);return json(data);}catch(e){await refund(db,job,'Provider could not complete the scan.');throw e;}
     }
     if(path==='/api/usage'&&method==='GET')return json({user:safeUser(user),rows:await db.all('SELECT * FROM ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100',[user.id])});
     if(path==='/api/billing/checkout'&&method==='POST'){const d=await body(request,z.object({plan:z.enum(['pro','advanced'])}));const origin=env.APP_ORIGIN||url.origin;
@@ -361,6 +369,10 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       // Removing a publisher hides its offers from Marketplaces and Price Finder; existing orders keep their offer.
       const publisherMatch=path.match(/^\/api\/admin\/publishers\/([^/]+)$/);
       if(publisherMatch&&method==='DELETE'){const d=normalizeDomain(decodeURIComponent(publisherMatch[1]));if(!d||!await db.run('UPDATE offers SET active=0 WHERE domain=? AND active=1',[d]))throw new ApiError(404,'Publisher not found in the marketplace.');return json({ok:true});}
+      if(path==='/api/admin/settings'){
+        if(method==='GET')return json(await settings());
+        if(method==='PUT'){const d=await body(request,z.object({markup:z.coerce.number().min(0,'The markup cannot be negative.').max(500,'Use a markup of 500% or less.'),scanners:z.boolean()}));await saveSettings(db,{markup:Math.round(d.markup*100)/100,scanners:d.scanners});return json(await loadSettings(db));}
+      }
       if(path==='/api/admin/orders'&&method==='GET')return json({rows:await db.all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC')});
       if(path==='/api/admin/quotes'&&method==='GET')return json({rows:await db.all('SELECT q.*,u.email FROM quote_requests q JOIN users u ON u.id=q.user_id ORDER BY q.created_at DESC')});
       const quoteMatch=path.match(/^\/api\/admin\/quotes\/([^/]+)$/);if(quoteMatch&&method==='PATCH'){const d=await body(request,z.object({status:z.enum(['pending','checking','quoted','unavailable']),price:z.number().min(0).max(1000000).nullable()}));if(d.status==='quoted'&&d.price===null)throw new ApiError(400,'A price is required for a quote.');if(!await db.run('UPDATE quote_requests SET status=?,price=?,updated_at=? WHERE id=?',[d.status,d.price,now(),quoteMatch[1]]))throw new ApiError(404,'Request not found.');return json({ok:true});}

@@ -14,7 +14,7 @@ test('libSQL migrations are idempotent, shared auth works, and failed SQL batche
  const client=createClient({url:'file::memory:',intMode:'number'});
  try{
   await migrateRemote(client);await migrateRemote(client);const db=libsqlDatabase(client);
-  const count=await db.first('SELECT COUNT(*) AS n FROM _migrations');assert.equal(count!.n,7);
+  const count=await db.first('SELECT COUNT(*) AS n FROM _migrations');assert.equal(count!.n,8);
   const response=await api(new Request('https://app.example/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'vercel@example.test',password:'fixture-password-123!'})}),db,{AUTH_MODE:'local',APP_ORIGIN:'https://app.example'},async()=>new Response(''));
   assert.equal(response.status,200);assert.match(response.headers.get('set-cookie')||'',/Secure/);
   const user=(await db.first('SELECT * FROM users'))!;

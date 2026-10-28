@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {openTestDatabase as openDatabase} from './database-fixture';
 import { api } from '../server/api';
 import { stripeWebhook } from '../server/billing';
-const base = { AUTH_MODE: 'local' as const, APP_ORIGIN: 'http://localhost:3000' };
+const base = { AUTH_MODE: 'local' as const, APP_ORIGIN: 'http://localhost:3000', FEATURE_SCANNERS: '1' };
 async function call(db: any, path: string, method: string, data: any, cookie = '', env: any = base) { const r = await api(new Request('http://localhost:3000/api' + path, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify(data) }), db, env, async () => new Response('')); return { status: r.status, data: await r.json(), cookie: r.headers.get('set-cookie')?.split(';')[0] || '' }; }
 test('Google charges one unit per ten requested results; backlink shortfalls refund unused units', async () => { const db = await openDatabase(':memory:'); const a = await call(db, '/auth/register', 'POST', { email: 'test@example.com', password: 'test-password-123!' }), original = globalThis.fetch; globalThis.fetch = async () => new Response(JSON.stringify({ tasks: [{ status_code: 20000, result: [{ items: [{ type: 'organic', domain: 'example.com', url: 'https://example.com', rank_absolute: 1 }] }] }] }), { headers: { 'content-type': 'application/json' } }); try {
     const env = { ...base, DATAFORSEO_LOGIN: 'fixture', DATAFORSEO_PASSWORD: 'fixture' };

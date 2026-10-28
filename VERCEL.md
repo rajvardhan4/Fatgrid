@@ -39,6 +39,7 @@ Each feature stays switched off, with a clear message in the app, until its vari
 |---|---|---|
 | Password reset email, backlink alert email | `RESEND_API_KEY`, `EMAIL_FROM` | https://resend.com : add and verify your sending domain, create an API key. `EMAIL_FROM` looks like `FatGrid <no-reply@your-domain.com>`. |
 | Log in with Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console > APIs & Services > Credentials > OAuth client ID (Web application). Authorized redirect URI: `https://fatgrid-ebon.vercel.app/api/auth/google/callback/` (keep the final slash). |
+| Scanners (Google, AI, Backlinks Profile, Backlinks Monitoring) | none, or `FEATURE_SCANNERS=1` | Hidden by default. Turn them on in Administration → Inventory → Pricing and features → "Show scanners" (no redeploy needed). |
 | Scheduled backlink monitoring | `CRON_SECRET` | Any long random string. `vercel.json` already runs a daily Vercel Cron at 06:00 UTC that sends it to `/api/internal/tick/`. |
 | Google / Backlinks / AI search | `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `PERPLEXITY_API_KEY` | DataForSEO and Perplexity accounts with balance. |
 | Paid plans and order payment | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_ADVANCED_PRICE_ID` | Stripe dashboard. See "Stripe setup" below. |
