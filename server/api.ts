@@ -106,7 +106,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       // authenticates service access before this shared, parameter-free updater runs.
       const privateDispatch=env.AUTH_MODE==='platform'&&env.PRIVATE_SCHEDULER==='1';
       if(!privateDispatch&&(!env.CRON_SECRET||!equal(request.headers.get('authorization')||'','Bearer '+env.CRON_SECRET)))throw new ApiError(401,'Unauthorized.');
-      if(env.FEATURE_SCANNERS==='1'||(await loadSettings(db)).scanners)await processGroups(db,env,safeFetch,40000);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
+      if(env.FEATURE_SCANNERS==='1')await processGroups(db,env,safeFetch,40000);await recoverStaleJobs(db);return json({ok:true,pending:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status IN ('running','processing')"))!.n,completed:(await db.first("SELECT COUNT(*) AS n FROM monitor_groups WHERE archived=0 AND status='completed'"))!.n});
     }
     if(path==='/api/billing/webhook'&&method==='POST')return json(await stripeWebhook(request,db,env));
     if(!['GET','HEAD','OPTIONS'].includes(method)){
@@ -121,8 +121,8 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     let cached:Promise<Awaited<ReturnType<typeof loadSettings>>>|undefined;
     const settings=()=>cached??=loadSettings(db);
     const pricing=async():Promise<Pricing>=>({markup:(await settings()).markup,admin:user?.role==='admin'});
-    const scannersOn=async()=>env.FEATURE_SCANNERS==='1'||(await settings()).scanners;
-    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start'],features:{scanners:await scannersOn()}});
+    const scannersOn=env.FEATURE_SCANNERS==='1';
+    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start'],features:{scanners:scannersOn}});
     if(path==='/api/health')return json({ok:!!await db.first('SELECT 1 AS ok'),database:'connected'});
     if(path.startsWith('/api/auth/')){
       if(env.AUTH_MODE==='platform')throw new ApiError(409,'Use the secure ChatGPT sign-in link on this hosted version.');
@@ -191,7 +191,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     requireUser(user);
     if(method!=='GET')await rateLimit(db,'write:'+user.id,100);
     // Scanners (Google, AI, Backlinks Profile, Backlinks Monitoring) stay hidden until an admin switches them on.
-    if(!await scannersOn()&&(path==='/api/backlinks/lookup'||path.startsWith('/api/monitor-groups')||path.startsWith('/api/monitors')||(path==='/api/scans'&&method==='POST')))throw new ApiError(404,'This feature is not available yet.','feature_disabled');
+    if(!scannersOn&&(path==='/api/backlinks/lookup'||path.startsWith('/api/monitor-groups')||path.startsWith('/api/monitors')||(path==='/api/scans'&&method==='POST')))throw new ApiError(404,'This feature is not available yet.','feature_disabled');
     if(path==='/api/backlinks/lookup'&&method==='POST'){await rateLimit(db,'lookup:'+user.id,20,3600000);const d=await body(request,z.object({domain}));return json(await backlinkSummary(d.domain,env));}
     const grouped=await groupApi(request,db,env,safeFetch,user);if(grouped!==undefined)return json(grouped);
     if(path==='/api/preferences'){
@@ -385,7 +385,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       if(publisherMatch&&method==='DELETE'){const d=normalizeDomain(decodeURIComponent(publisherMatch[1]));if(!d||!await db.run('UPDATE offers SET active=0 WHERE domain=? AND active=1',[d]))throw new ApiError(404,'Publisher not found in the marketplace.');return json({ok:true});}
       if(path==='/api/admin/settings'){
         if(method==='GET')return json(await settings());
-        if(method==='PUT'){const d=await body(request,z.object({markup:z.coerce.number().min(0,'The markup cannot be negative.').max(500,'Use a markup of 500% or less.'),scanners:z.boolean()}));await saveSettings(db,{markup:Math.round(d.markup*100)/100,scanners:d.scanners});return json(await loadSettings(db));}
+        if(method==='PUT'){const d=await body(request,z.object({markup:z.coerce.number().min(0,'The markup cannot be negative.').max(500,'Use a markup of 500% or less.')}));await saveSettings(db,{markup:Math.round(d.markup*100)/100});return json(await loadSettings(db));}
       }
       if(path==='/api/admin/orders'&&method==='GET')return json({rows:await db.all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC')});
       if(path==='/api/admin/quotes'&&method==='GET')return json({rows:await db.all('SELECT q.*,u.email FROM quote_requests q JOIN users u ON u.id=q.user_id ORDER BY q.created_at DESC')});

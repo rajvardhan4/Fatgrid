@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {request,post,date,money,Empty,type Row} from './ui';
+import {request,post,date,money,Empty,Skeleton,SkeletonRows,type Row} from './ui';
 import {parseDomains} from '../shared/domain';
 // Opens a customer's page in the Users tab; the Users tab reads ?user= when it mounts.
 export function openCustomer(id:string,setTab:(t:string)=>void){history.replaceState(null,'','/admin/?tab=users&user='+encodeURIComponent(id));setTab('users');}
@@ -26,9 +26,8 @@ export function AdminActivity({user,setTab,compact=false}:{user?:string,setTab:(
  const rows=compact?data.rows.slice(0,10):data.rows;
  return <section className="results admin-activity">{!compact&&<form className="section-bar" onSubmit={e=>{e.preventDefault();setPage(1);setQuery(search)}}><select aria-label="Activity type" value={type} onChange={e=>{setType(e.target.value);setPage(1)}}>{activityTypes.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>{!user&&<><input aria-label="Search customer" placeholder="Customer name or email" value={search} onChange={e=>setSearch(e.target.value)}/><button type="submit">Search</button></>}</form>}
   {error&&<div className="error" role="alert">{error}</div>}
-  <div className="table-wrap"><table><thead><tr><th>When</th>{!user&&<th>Customer</th>}<th>Activity</th><th>Details</th><th>Status</th></tr></thead><tbody>{rows.map((e:Row,i:number)=>{const d=describe(e);return <tr key={e.type+e.at+i}><td className="nowrap">{date(e.at)}</td>{!user&&<td>{e.user_id&&e.email?<button className="text-link" onClick={()=>openCustomer(e.user_id,setTab)}>{e.name||e.email}</button>:<span className="muted">Visitor</span>}{e.email&&<small className="block">{e.email}</small>}</td>}<td>{d.what}</td><td className="activity-detail">{d.detail||'—'}</td><td>{d.status?<span className={'status '+d.status}>{String(d.status).replace('_',' ')}</span>:'—'}</td></tr>})}</tbody></table></div>
+  <div className="table-wrap"><table><thead><tr><th>When</th>{!user&&<th>Customer</th>}<th>Activity</th><th>Details</th><th>Status</th></tr></thead><tbody>{loading&&!rows.length&&<SkeletonRows rows={compact?5:8} cols={user?4:5}/>}{rows.map((e:Row,i:number)=>{const d=describe(e);return <tr key={e.type+e.at+i}><td className="nowrap">{date(e.at)}</td>{!user&&<td>{e.user_id&&e.email?<button className="text-link" onClick={()=>openCustomer(e.user_id,setTab)}>{e.name||e.email}</button>:<span className="muted">Visitor</span>}{e.email&&<small className="block">{e.email}</small>}</td>}<td>{d.what}</td><td className="activity-detail">{d.detail||'—'}</td><td>{d.status?<span className={'status '+d.status}>{String(d.status).replace('_',' ')}</span>:'—'}</td></tr>})}</tbody></table></div>
   {!rows.length&&!loading&&<Empty title="No activity yet">Customer actions appear here as they use the site.</Empty>}
-  {loading&&<p className="muted small-note" role="status">Loading…</p>}
   {!compact&&<div className="section-bar"><button disabled={page===1||loading} onClick={()=>setPage(p=>p-1)}>Newer</button><span>Page {page}</span><button disabled={!data.more||loading} onClick={()=>setPage(p=>p+1)}>Older</button></div>}
  </section>;
 }
@@ -36,7 +35,7 @@ export function AdminOverview({setTab}:{setTab:(t:string)=>void}){
  const [o,setO]=useState<Row|null>(null),[error,setError]=useState('');
  useEffect(()=>{request('/admin/overview').then(setO).catch(e=>setError(e.message))},[]);
  if(error)return <div className="error" role="alert">{error}</div>;
- if(!o)return <p className="muted" role="status">Loading…</p>;
+ if(!o)return <Skeleton rows={4} cols={3}/>;
  const card=(label:string,value:any,note?:string,go?:string)=><button className="kpi" key={label} onClick={()=>go&&setTab(go)} disabled={!go}><span>{label}</span><b>{value}</b>{note&&<small>{note}</small>}</button>;
  return <>
   <div className="kpi-grid">
@@ -85,5 +84,5 @@ export function AdminUsers({setTab}:{setTab:(t:string)=>void}){
   <section className="results"><p className="small-note">Showing up to 100 records per category.</p>{detail.collections[section].length?<div className="table-wrap"><table><thead><tr>{Object.keys(detail.collections[section][0]).map(k=><th key={k}>{k.replaceAll('_',' ')}</th>)}</tr></thead><tbody>{detail.collections[section].map((r:Row,i:number)=><tr key={r.id||i}>{Object.entries(r).map(([k,v])=><td key={k} style={{maxWidth:360,whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{v==null?'—':String(v)}</td>)}</tr>)}</tbody></table></div>:<Empty title="No records yet"/>}</section>
  </>}
  return <>{error&&<div className="error" role="alert">{error}</div>}<form className="section-bar" onSubmit={e=>{e.preventDefault();setPage(1);setQuery(search)}}><input aria-label="Search users by name or email" placeholder="Search name or email" value={search} onChange={e=>setSearch(e.target.value)}/><button type="submit">Search</button><span>{data.total} registered customers</span></form>
- <section className="results"><div className="table-wrap"><table><thead><tr>{['Name','Email','Role','Plan','Units','Registered','Details'].map(t=><th key={t}>{t}</th>)}</tr></thead><tbody>{data.rows.map((u:Row)=><tr key={u.id}><td>{u.name}</td><td>{u.email}</td><td>{u.role}</td><td>{u.plan}</td><td>{u.units}</td><td>{date(u.created_at)}</td><td><button disabled={loading} onClick={()=>open(u.id)}>View customer</button></td></tr>)}</tbody></table></div>{!data.rows.length&&!loading&&<Empty title="No users found"/>}<div className="section-bar"><button disabled={page===1||loading} onClick={()=>setPage(p=>p-1)}>Previous</button><span>Page {page}</span><button disabled={page*50>=data.total||loading} onClick={()=>setPage(p=>p+1)}>Next</button></div></section>{loading&&<p role="status">Loading…</p>}</>;
+ <section className="results"><div className="table-wrap"><table><thead><tr>{['Name','Email','Role','Plan','Units','Registered','Details'].map(t=><th key={t}>{t}</th>)}</tr></thead><tbody>{loading&&!data.rows.length&&<SkeletonRows cols={7}/>}{data.rows.map((u:Row)=><tr key={u.id}><td>{u.name}</td><td>{u.email}</td><td>{u.role}</td><td>{u.plan}</td><td>{u.units}</td><td>{date(u.created_at)}</td><td><button disabled={loading} onClick={()=>open(u.id)}>View customer</button></td></tr>)}</tbody></table></div>{!data.rows.length&&!loading&&<Empty title="No users found"/>}<div className="section-bar"><button disabled={page===1||loading} onClick={()=>setPage(p=>p-1)}>Previous</button><span>Page {page}</span><button disabled={page*50>=data.total||loading} onClick={()=>setPage(p=>p+1)}>Next</button></div></section></>;
 }

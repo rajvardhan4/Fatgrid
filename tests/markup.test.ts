@@ -4,7 +4,7 @@ import {openTestDatabase as openDatabase} from './database-fixture';
 import {api} from '../server/api';
 import {customerPrice} from '../server/pricing';
 const env={AUTH_MODE:'local' as const,APP_ORIGIN:'http://localhost:3000'};
-function caller(db:any){return async(path:string,method='GET',data?:any,cookie='')=>{const r=await api(new Request('http://localhost:3000/api'+path,{method,headers:{'Content-Type':'application/json',Origin:'http://localhost:3000',Cookie:cookie},body:data===undefined?undefined:JSON.stringify(data)}),db,env,async()=>new Response(''));const text=await r.text();let value:any=text;try{value=JSON.parse(text)}catch{}return {status:r.status,data:value};};}
+function caller(db:any,environment:Record<string,string>=env){return async(path:string,method='GET',data?:any,cookie='')=>{const r=await api(new Request('http://localhost:3000/api'+path,{method,headers:{'Content-Type':'application/json',Origin:'http://localhost:3000',Cookie:cookie},body:data===undefined?undefined:JSON.stringify(data)}),db,environment as any,async()=>new Response(''));const text=await r.text();let value:any=text;try{value=JSON.parse(text)}catch{}return {status:r.status,data:value};};}
 async function login(db:any,email:string){const r=await api(new Request('http://localhost:3000/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:3000'},body:JSON.stringify({email,password:'pass-word-123'})}),db,env,async()=>new Response(''));return r.headers.get('set-cookie')!.split(';')[0];}
 
 test('customer price adds the markup and rounds up to whole dollars',()=>{
@@ -12,7 +12,7 @@ test('customer price adds the markup and rounds up to whole dollars',()=>{
  assert.equal(customerPrice(10.5,0),10.5);assert.equal(customerPrice(null,50),null);
 });
 
-test('scanners stay hidden until an admin switches them on',async()=>{
+test('scanners stay hidden unless the server switches them on',async()=>{
  const db=await openDatabase(':memory:'),call=caller(db);
  try{
   const admin=await login(db,'boss@example.com'),member=await login(db,'buyer@example.com');
@@ -22,11 +22,14 @@ test('scanners stay hidden until an admin switches them on',async()=>{
    const r=await call(path,method,data,member);assert.equal(r.status,404,path);assert.equal(r.data.code,'feature_disabled');
   }
   assert.equal((await call('/scans','GET',undefined,member)).status,200);
-  assert.equal((await call('/admin/settings','PUT',{markup:0,scanners:true},member)).status,403);
-  assert.deepEqual((await call('/admin/settings','PUT',{markup:0,scanners:true},admin)).data,{markup:0,scanners:true});
-  assert.equal((await call('/session','GET',undefined,member)).data.features.scanners,true);
-  assert.equal((await call('/scans','POST',{kind:'google',query:'x'},member)).data.code,'provider_unavailable');
-  assert.equal((await call('/monitor-groups','GET',undefined,member)).status,200);
+  // The admin settings no longer switch scanners on, even if asked to.
+  assert.deepEqual((await call('/admin/settings','PUT',{markup:0,scanners:true},admin)).data,{markup:0});
+  await db.run("INSERT INTO app_settings (key,value) VALUES ('scanners','1')");
+  assert.equal((await call('/session','GET',undefined,member)).data.features.scanners,false);
+  const on=caller(db,{...env,FEATURE_SCANNERS:'1'});
+  assert.equal((await on('/session','GET',undefined,member)).data.features.scanners,true);
+  assert.equal((await on('/scans','POST',{kind:'google',query:'x'},member)).data.code,'provider_unavailable');
+  assert.equal((await on('/monitor-groups','GET',undefined,member)).status,200);
  }finally{db.close()}
 });
 
@@ -39,8 +42,9 @@ test('a markup is charged everywhere customers see a price, and the source stays
   await call('/admin/demo','POST',{action:'load'},admin);
   // Without a markup, nothing changes.
   assert.equal((await call('/offers?domain=big.com','GET',undefined,member)).data.offers[0].marketplace,'Seller X');
-  assert.equal((await call('/admin/settings','PUT',{markup:-5,scanners:false},admin)).status,400);
-  assert.deepEqual((await call('/admin/settings','PUT',{markup:50,scanners:false},admin)).data,{markup:50,scanners:false});
+  assert.equal((await call('/admin/settings','PUT',{markup:-5},admin)).status,400);
+  assert.equal((await call('/admin/settings','PUT',{markup:50},member)).status,403);
+  assert.deepEqual((await call('/admin/settings','PUT',{markup:50},admin)).data,{markup:50});
   assert.equal((await call('/admin/settings','GET',undefined,admin)).data.markup,50);
   const list=(await call('/inventory?type=All&q=.com&size=100','GET',undefined,member)).data.rows;
   const big=list.find((r:any)=>r.domain==='big.com'),small=list.find((r:any)=>r.domain==='small.com');

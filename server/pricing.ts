@@ -1,14 +1,14 @@
 import type {Database,Row} from './db';
 import {isDemo} from '../shared/domain';
-// Site settings an administrator changes in Administration: the service markup and whether scanners are on.
-export type Settings={markup:number,scanners:boolean};
+// Site settings an administrator changes in Administration. Scanners are switched on only on the server (FEATURE_SCANNERS=1).
+export type Settings={markup:number};
 export async function loadSettings(db:Database):Promise<Settings>{
  const rows=await db.all('SELECT key,value FROM app_settings');
  const get=(k:string)=>rows.find(r=>r.key===k)?.value;
- return {markup:Math.min(500,Math.max(0,Number(get('markup'))||0)),scanners:get('scanners')==='1'};
+ return {markup:Math.min(500,Math.max(0,Number(get('markup'))||0))};
 }
 export async function saveSettings(db:Database,s:Settings){
- await db.batch([['markup',String(s.markup)],['scanners',s.scanners?'1':'0']].map(([k,v])=>({sql:'INSERT INTO app_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',args:[k,v]})));
+ await db.run('INSERT INTO app_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',['markup',String(s.markup)]);
 }
 // Managed service pricing: customers see the publisher's cost plus the markup, rounded up to whole dollars.
 // With a markup the source marketplace stays private, because the service handles the placement.

@@ -147,3 +147,13 @@ button.kpi:not(:disabled):hover{border-color:var(--accent)}
 .notice.positive{border-color:#bfe3cc;background:#eef9f2;color:#157a44}
 .site-settings{margin-bottom:16px}
 .site-settings input[type=number]{max-width:140px}
+/* Loading placeholders: grey bars with a light sweep, shown until data arrives. */
+.skeleton{display:block;height:12px;max-width:100%;border-radius:6px;background:linear-gradient(90deg,#ececef 0%,#f6f6f8 40%,#ececef 80%);background-size:200% 100%;animation:skeleton-shimmer 1.4s ease-in-out infinite}
+@keyframes skeleton-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
+.skeleton-tr td{height:57px;vertical-align:middle}
+.skeleton-table{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:4px 0 16px}
+.skeleton-row{display:grid;gap:28px;align-items:center;height:57px;padding:0 18px;border-bottom:1px solid var(--line)}
+.skeleton-row:last-child{border-bottom:0}
+.skeleton-avatar{width:32px;height:32px;border-radius:50%}
+.skeleton-line{width:140px;height:14px}
+@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}
