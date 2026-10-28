@@ -130,3 +130,5 @@ Provider references: [DataForSEO backlinks summary](https://docs.dataforseo.com/
 ## Credits
 
 Country flags use the "Twemoji Country Flags" font from [country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill) (MIT), with flag artwork from [Twemoji](https://github.com/twitter/twemoji) licensed under [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). See `public/fonts/TWEMOJI-FLAGS-LICENSE.txt`.
+
+Branding (The Sponsored Post): logo and colours from the design file "Admin listing page"; the Urbanist font is self-hosted from [@fontsource-variable/urbanist](https://fontsource.org/fonts/urbanist) under the SIL Open Font License 1.1 (`public/fonts/URBANIST-OFL.txt`).
