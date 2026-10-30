@@ -416,3 +416,8 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .fav-toggle.chosen svg{fill:currentColor}
 .fav-toggle.chosen b{background:#fff;color:var(--accent)}
 .fav-toggle{margin-right:auto}
+/* An open row menu sits above every other row, including hovered ones. */
+.publisher-table td.sticky:has(.row-menu),.publisher-table td.sticky:has(.row-menu):hover{z-index:20}
+.project-menu .menu-error{margin:8px 6px 2px;padding:8px 10px;border-radius:8px;background:#fff3f3;color:#b3372e;font-size:12px;font-weight:600;white-space:normal;line-height:1.4}
+.project-menu .menu-error a{color:var(--accent);text-decoration:underline}
+.publisher-table .publisher-actions .project-menu .menu-new button:disabled{opacity:.7;cursor:progress}
