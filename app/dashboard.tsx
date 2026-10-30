@@ -36,7 +36,10 @@ export default function Dashboard({route}:{route:string}){
  useEffect(()=>{if(route==='/inventory')request('/inventory/options').then(setOptions).catch(()=>{})},[route]);
  async function savePreference(key:string,value:any){await post('/preferences',{key,value})}
  async function refreshDecisions(project=selectedProject){if(user)setDecisions((await request('/decisions?project='+encodeURIComponent(project))).rows)}
- async function saveDecision(domain:string,data:Row){if(!user){signIn();return}await post('/decisions',{domain,project_id:data.decision==='blacklist'?'':selectedProject,...data});await refreshDecisions(data.project_id??selectedProject)}
+ // Marks show at once; the server saves in the background and a failed save puts the old marks back.
+ async function saveDecision(domain:string,data:Row){if(!user){signIn();return}const project=data.project_id??(data.decision==='blacklist'?'':selectedProject),before=decisions;
+  setDecisions(list=>{const i=list.findIndex((d:Row)=>d.domain===domain&&d.project_id===project),next:Row={...(i>=0?list[i]:{domain,project_id:project,decision:'',favorite:0,notes:''}),...data,project_id:project};if('favorite' in data)next.favorite=data.favorite?1:0;return i>=0?list.map((d,j)=>j===i?next:d):[...list,next]});
+  try{await post('/decisions',{domain,...data,project_id:project})}catch(e){setDecisions(before);throw e}}
  useEffect(()=>{if(!user)return;request('/projects').then(d=>setProjects(d.rows)).catch(()=>{});request('/preferences').then(p=>{if(Array.isArray(p.columns))setShown(p.columns);if(Array.isArray(p.presets))setPresets(p.presets);if(typeof p.activeProject==='string')setSelectedProject(p.activeProject);setNoticeDismissed(!!p.dismissNotice)}).catch(()=>{})},[user?.id]);
  useEffect(()=>{refreshDecisions()},[selectedProject,user?.id]);
  async function action(fn:()=>Promise<void>){setBusy(true);setError('');try{await fn()}catch(e){setError((e as Error).message)}finally{setBusy(false);await refreshSession()}}

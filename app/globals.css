@@ -323,3 +323,28 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .auth-card .primary,.auth-card .oauth{border-radius:999px;min-height:44px}
 .auth-card .text-link{font-weight:600;color:var(--accent)}
 @media (prefers-reduced-motion:reduce){.auth-card,.publisher-table .publisher-actions .is-set{animation:none}}
+/* Page header scrolls away with the page; only the table header stays pinned (at the very top). */
+.shell>header{position:relative;top:auto}
+/* Roomier rows and header cells. */
+.publisher-table tbody td{padding-top:14px;padding-bottom:14px}
+.publisher-table thead tr:not(.group-row) th{padding:14px 12px;height:auto;font-size:13px;font-weight:700;letter-spacing:.01em}
+.publisher-table thead tr:not(.group-row) th:first-child{padding-left:14px}
+/* Row actions: colour-coded soft buttons for decisions, quiet icons for the tools. */
+.publisher-table .publisher-actions{gap:5px;margin-top:8px;padding:0;background:transparent;box-shadow:none;opacity:1}
+.publisher-table tr:hover .publisher-actions,.publisher-table .publisher-actions:focus-within{background:transparent;box-shadow:none}
+.publisher-table .publisher-actions .boxed{width:26px;height:26px;border-radius:8px;border:1px solid transparent}
+.publisher-table .publisher-actions .boxed:nth-of-type(1){background:#e8f6ee;color:#157a44}
+.publisher-table .publisher-actions .boxed:nth-of-type(2){background:#fff4d6;color:#8a5a00}
+.publisher-table .publisher-actions .boxed:nth-of-type(3){background:#eef0f3;color:#5c6670}
+.publisher-table .publisher-actions .boxed:nth-of-type(4){background:#fdecec;color:#c9181f}
+.publisher-table .publisher-actions .boxed:hover{transform:translateY(-1px);box-shadow:0 4px 10px #0613221a;border-color:currentColor;background:#fff}
+.publisher-table .publisher-actions .boxed.is-set:nth-of-type(1){background:#157a44;color:#fff}
+.publisher-table .publisher-actions .boxed.is-set:nth-of-type(2){background:#d99a00;color:#fff}
+.publisher-table .publisher-actions .boxed.is-set:nth-of-type(3){background:#5c6670;color:#fff}
+.publisher-table .publisher-actions .boxed.is-set:nth-of-type(4){background:#c9181f;color:#fff}
+.publisher-table .publisher-actions .boxed.is-set{border-color:transparent;animation:action-pop .25s ease}
+.publisher-table .publisher-actions .action-gap{width:1px;height:16px;margin:0 2px;background:#e3e5e8}
+.publisher-table .publisher-actions .more,.publisher-table .publisher-actions button:not(.boxed),.publisher-table .publisher-actions a{width:26px;height:26px;border-radius:8px;background:transparent;color:#9ba1a7}
+.publisher-table .publisher-actions .more:hover,.publisher-table .publisher-actions button:not(.boxed):hover,.publisher-table .publisher-actions a:hover{background:#f1f3f6;color:var(--ink);transform:none}
+.publisher-table .publisher-actions button:not(.boxed).is-set{background:transparent;color:#f6921e;animation:action-pop .25s ease}
+.publisher-table .publisher-actions .more.is-set{color:var(--accent)}
