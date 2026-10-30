@@ -393,3 +393,26 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .publisher-table td.sticky-domain:hover,.publisher-table td.sticky-domain:focus-within{z-index:9}
 .publisher-table .demo-badge[data-tip]:after{top:calc(100% + 7px);bottom:auto;left:0;transform:translateY(-4px)}
 .publisher-table .demo-badge[data-tip]:hover:after{transform:none}
+/* Favourite star in brand red, filled when set. */
+.publisher-table .publisher-actions button.fav.is-set{color:var(--accent)}
+.publisher-table .publisher-actions button.fav.is-set svg{fill:currentColor}
+/* Inline project picker under the add button. */
+.publisher-table .publisher-actions .boxed.add.open{background:var(--accent);color:#fff}
+.publisher-table .publisher-actions .boxed.add.open:after{display:none}
+.project-menu{min-width:260px}
+.project-menu .menu-title{padding:6px 10px 8px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.project-menu .active-tag{padding:2px 7px;border-radius:999px;background:var(--selection);color:var(--accent);font-size:11px;font-weight:700}
+.publisher-table .publisher-actions .project-menu .is-set{background:var(--selection)}
+.project-menu .menu-new{display:flex;gap:6px;margin:6px 4px 2px;padding-top:8px;border-top:1px solid var(--line)}
+.project-menu .menu-new input{flex:1;min-width:0;min-height:34px;padding:6px 10px;border-radius:8px;font-size:13px}
+.publisher-table .publisher-actions .project-menu .menu-new button{width:auto;flex:none;padding:0 14px;min-height:34px;border-radius:8px;background:var(--accent);color:#fff;justify-content:center}
+.publisher-table .publisher-actions .project-menu .menu-new button:hover{background:var(--accent-dark);color:#fff}
+/* Favorites toggle beside the type filter. */
+.table-toolbar{gap:10px}
+.fav-toggle{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:6px 14px;min-height:33px;font-weight:600;color:var(--muted)}
+.fav-toggle b{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--selection);color:var(--accent);font-size:11px}
+.fav-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.fav-toggle.chosen{background:var(--accent);border-color:var(--accent);color:#fff}
+.fav-toggle.chosen svg{fill:currentColor}
+.fav-toggle.chosen b{background:#fff;color:var(--accent)}
+.fav-toggle{margin-right:auto}

@@ -83,8 +83,10 @@ export async function refund(db:Database,job:string,error:string){await db.batch
 ]);}
 export async function recoverStaleJobs(db:Database){const cutoff=new Date(Date.now()-5*60000).toISOString();const rows=await db.all("SELECT id FROM jobs WHERE status='running' AND created_at<? AND NOT EXISTS (SELECT 1 FROM monitor_groups g WHERE g.job_id=jobs.id AND g.status IN ('running','processing') AND g.last_checked>?)",[cutoff,cutoff]);for(const row of rows)await refund(db,row.id,'Operation interrupted; units refunded.');}
 const inventorySelect='SELECT p.*,MIN(o.price) AS price,COUNT(o.id) AS offers,GROUP_CONCAT(DISTINCT o.type) AS types,GROUP_CONCAT(DISTINCT o.follow) AS follow,MAX(o.sponsored) AS sponsored,MAX(o.restricted) AS restricted FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1';
-async function inventory(db:Database,search:URLSearchParams,pricing:Pricing){
+async function inventory(db:Database,search:URLSearchParams,pricing:Pricing,userId?:string){
   const where:string[]=['1=1'],args:unknown[]=[];
+  // Favourites only: publishers this account starred (in any project). Signed-out visitors have none.
+  if(search.get('favorites')==='1'){if(userId){where.push('p.domain IN (SELECT domain FROM publisher_decisions WHERE user_id=? AND favorite=1)');args.push(userId)}else where.push('1=0')}
   for(const [param,column] of [['q','p.domain'],['keyword','p.title']] as const){const value=search.get(param);if(value){where.push(`${column} LIKE ?`);args.push('%'+value+'%')}}
   for(const [param,column] of [['country','p.country'],['category','p.category'],['language','p.language'],['type','o.type'],['marketplace','o.marketplace'],['follow','o.follow']] as const){const value=search.get(param);if(value&&value!=='All'&&value!=='Any'){where.push(`${column}=?`);args.push(value)}}
   for(const [param,column,op] of [['minPrice','o.price','>='],['maxPrice','o.price','<='],['minTraffic','p.traffic','>='],['maxTraffic','p.traffic','<='],['minDR','p.dr','>='],['maxDR','p.dr','<='],['minAS','p.authority','>='],['maxAS','p.authority','<=']] as const){const v=search.get(param);if(v!==null&&v!==''&&Number.isFinite(Number(v))){where.push(`${column}${op}?`);args.push(column==='o.price'?costFor(Number(v),pricing.markup):Number(v))}}
@@ -179,7 +181,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       }
       throw new ApiError(404,'Authentication route not found.');
     }
-    if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams,await pricing()));
+    if(path==='/api/inventory'&&method==='GET')return json(await inventory(db,url.searchParams,await pricing(),user?.id));
     if(path==='/api/inventory/options'&&method==='GET')return json({countries:await db.all("SELECT DISTINCT country AS value FROM publishers WHERE country<>'' ORDER BY country"),categories:await db.all("SELECT DISTINCT category AS value FROM publishers WHERE category<>'' ORDER BY category"),marketplaces:hideSource(await pricing())?[]:await db.all('SELECT DISTINCT marketplace AS value FROM offers ORDER BY marketplace')});
     if(path==='/api/submissions'&&method==='POST'){
       await rateLimit(db,'submit:'+(request.headers.get('x-client-ip')||'unknown'),5,3600000);

@@ -32,5 +32,9 @@ test('restricted niches flow from CSV import and publisher listings into the mar
   const by=async(n:string)=>(await call('/inventory?type=All&niche='+n)).data.rows.map((r:any)=>r.domain).sort();
   assert.deepEqual(await by('cbd'),['imported.com']);assert.deepEqual(await by('crypto'),['listed.com']);assert.deepEqual(await by('forex'),[]);
   assert.equal((await call('/inventory?type=All&niche=x%27')).data.rows.length,2);
+  // Favorites only shows the signed-in account's starred publishers.
+  assert.equal((await call('/decisions','POST',{domain:'imported.com',project_id:'',favorite:true},admin)).status,200);
+  assert.deepEqual((await call('/inventory?type=All&favorites=1','GET',undefined,admin)).data.rows.map((r:any)=>r.domain),['imported.com']);
+  assert.deepEqual((await call('/inventory?type=All&favorites=1')).data.rows,[]);
  }finally{db.close()}
 });
