@@ -28,5 +28,9 @@ test('restricted niches flow from CSV import and publisher listings into the mar
   await call('/admin/submissions/'+sub.id,'PATCH',{action:'approve'},admin);
   row=(await call('/inventory?q=listed.com&type=All')).data.rows[0];
   assert.equal(row.niches,'crypto,dating');assert.equal(row.restricted,1);
+  // Clicking a niche icon filters to publishers that accept it.
+  const by=async(n:string)=>(await call('/inventory?type=All&niche='+n)).data.rows.map((r:any)=>r.domain).sort();
+  assert.deepEqual(await by('cbd'),['imported.com']);assert.deepEqual(await by('crypto'),['listed.com']);assert.deepEqual(await by('forex'),[]);
+  assert.equal((await call('/inventory?type=All&niche=x%27')).data.rows.length,2);
  }finally{db.close()}
 });

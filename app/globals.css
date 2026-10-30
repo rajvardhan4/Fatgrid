@@ -291,3 +291,35 @@ tr:hover .demo-badge{transform:scale(1.08)}
 @media(min-width:701px){.publisher-table .sticky-domain{min-width:250px;width:250px;max-width:250px}.publisher-table .sticky-price{left:290px}}
 .publisher-actions [data-tip]:after{left:-4px;transform:translate(0,4px)}
 .publisher-actions [data-tip]:hover:after,.publisher-actions [data-tip]:focus-visible:after{transform:none}
+/* Header row follows the page header (offset set by the table), Offer/Authority row hidden, white header text. */
+.results .table-wrap:has(.publisher-table){max-height:none;overflow-x:auto;overflow-y:hidden}
+.publisher-table .group-row{display:none}
+.publisher-table thead tr:not(.group-row) th{top:var(--sticky-top,0px)}
+.publisher-table thead th,.publisher-table thead th *{color:#fff!important}
+.publisher-table thead th a,.publisher-table thead th button{text-decoration-color:#ffffff59}
+/* Row actions: a rounded pill of round icon buttons that lights up on row hover. */
+.publisher-table .publisher-actions{display:inline-flex;align-items:center;gap:1px;margin-top:6px;padding:2px;border-radius:999px;background:#f1f3f6;opacity:.7;transition:opacity .2s ease,background-color .2s ease,box-shadow .2s ease}
+.publisher-table tr:hover .publisher-actions,.publisher-table .publisher-actions:focus-within{opacity:1;background:#fff;box-shadow:0 4px 14px #0613221f}
+.publisher-table .publisher-actions .boxed,.publisher-table .publisher-actions .more,.publisher-table .publisher-actions button,.publisher-table .publisher-actions a{width:24px;height:24px;padding:0;min-height:0;border:0;border-radius:50%;background:transparent;display:inline-grid;place-items:center;color:#5c6670;transition:transform .15s ease,background-color .15s ease,color .15s ease}
+.publisher-table .publisher-actions .boxed:hover,.publisher-table .publisher-actions button:hover,.publisher-table .publisher-actions a:hover{transform:scale(1.15);background:var(--selection);color:var(--accent);border-color:transparent}
+.publisher-table .publisher-actions .is-set,.publisher-table .publisher-actions .is-set:hover{background:var(--accent);color:#fff;border-color:transparent;animation:action-pop .3s ease}
+.publisher-table .publisher-actions .action-gap{width:1px;height:14px;margin:0 3px;background:#d5d8dd}
+@keyframes action-pop{0%{transform:scale(.7)}60%{transform:scale(1.2)}100%{transform:scale(1)}}
+/* Restricted niche icons are filter buttons on Marketplaces. */
+.niche-icons{display:inline-flex;gap:4px}
+.niche-icon{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;min-height:0;border:1px solid transparent;border-radius:8px;background:#fdf6e7;color:#8a5a00}
+button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shadow:0 4px 10px #8a5a0022}
+.niche-icon.active{background:var(--accent);color:#fff}
+/* One sign in / sign up screen with a sliding switch. */
+.auth-switch{position:relative;display:grid;grid-template-columns:1fr 1fr;width:300px;max-width:100%;margin:0 auto 18px;padding:5px;border-radius:999px;background:#fff;border:1px solid var(--line);box-shadow:0 8px 24px #0613220f}
+.auth-switch button{position:relative;z-index:1;border:0;background:transparent;border-radius:999px;min-height:40px;font-size:15px;font-weight:700;color:var(--muted);transition:color .25s ease}
+.auth-switch button[aria-selected=true]{color:#fff}
+.auth-switch-pill{position:absolute;top:5px;bottom:5px;left:5px;width:calc(50% - 5px);border-radius:999px;background:var(--accent);box-shadow:0 6px 16px #ed1c2440;transition:transform .32s cubic-bezier(.4,1.4,.5,1)}
+.auth-switch.register .auth-switch-pill{transform:translateX(100%)}
+.auth-card{animation:auth-in .35s ease}
+@keyframes auth-in{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+.auth-card{border-radius:18px}
+.auth-card input{border-radius:10px}
+.auth-card .primary,.auth-card .oauth{border-radius:999px;min-height:44px}
+.auth-card .text-link{font-weight:600;color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.auth-card,.publisher-table .publisher-actions .is-set{animation:none}}

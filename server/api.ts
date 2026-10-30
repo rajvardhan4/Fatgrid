@@ -88,6 +88,7 @@ async function inventory(db:Database,search:URLSearchParams,pricing:Pricing){
   for(const [param,column] of [['q','p.domain'],['keyword','p.title']] as const){const value=search.get(param);if(value){where.push(`${column} LIKE ?`);args.push('%'+value+'%')}}
   for(const [param,column] of [['country','p.country'],['category','p.category'],['language','p.language'],['type','o.type'],['marketplace','o.marketplace'],['follow','o.follow']] as const){const value=search.get(param);if(value&&value!=='All'&&value!=='Any'){where.push(`${column}=?`);args.push(value)}}
   for(const [param,column,op] of [['minPrice','o.price','>='],['maxPrice','o.price','<='],['minTraffic','p.traffic','>='],['maxTraffic','p.traffic','<='],['minDR','p.dr','>='],['maxDR','p.dr','<='],['minAS','p.authority','>='],['maxAS','p.authority','<=']] as const){const v=search.get(param);if(v!==null&&v!==''&&Number.isFinite(Number(v))){where.push(`${column}${op}?`);args.push(column==='o.price'?costFor(Number(v),pricing.markup):Number(v))}}
+  const niche=search.get('niche');if(niche&&/^[a-z]{2,20}$/.test(niche)){where.push("CONCAT(',',p.niches,',') LIKE ?");args.push('%,'+niche+',%')}
   for(const key of ['sponsored','restricted']){const v=search.get(key);if(v==='0'||v==='1'){where.push(`o.${key}=?`);args.push(Number(v))}}
   const sorts:Record<string,string>={domain:'p.domain',price:'price',traffic:'p.traffic',authority:'p.authority',dr:'p.dr',offers:'offers'};
   const sort=sorts[search.get('sort')||'domain']||'p.domain',dir=search.get('direction')==='desc'?'DESC':'ASC';
