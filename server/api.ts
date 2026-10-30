@@ -150,7 +150,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         if(!emailConfigured(env))throw new ApiError(503,'Password reset by email is not available yet. Contact support from your account or ask the administrator.','email_unavailable');
         const record=await db.first('SELECT id,email FROM users WHERE email=?',[d.email]);
         // The response is the same whether or not the account exists.
-        if(record){const token=randomToken();await db.run('INSERT INTO password_resets (token_hash,user_id,expires_at,used) VALUES (?,?,?,0)',[await sha(token),record.id,Date.now()+3600000]);await sendEmail(env,record.email,'Reset your FatGrid password',`Someone asked to reset the password for this FatGrid account.\n\nOpen this link within 1 hour to choose a new password:\n${origin}/auth/reset/?token=${token}\n\nIf you did not ask for this, ignore this email; your password stays the same.`);}
+        if(record){const token=randomToken();await db.run('INSERT INTO password_resets (token_hash,user_id,expires_at,used) VALUES (?,?,?,0)',[await sha(token),record.id,Date.now()+3600000]);await sendEmail(env,record.email,'Reset your The Sponsored Post password',`Someone asked to reset the password for this The Sponsored Post account.\n\nOpen this link within 1 hour to choose a new password:\n${origin}/auth/reset/?token=${token}\n\nIf you did not ask for this, ignore this email; your password stays the same.`);}
         return json({ok:true});
       }
       if(path==='/api/auth/reset'&&method==='POST'){

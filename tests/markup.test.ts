@@ -52,7 +52,7 @@ test('a markup is charged everywhere customers see a price, and the source stays
   const filtered=(await call('/inventory?type=All&minPrice=140&maxPrice=160','GET',undefined,member)).data.rows.map((r:any)=>r.domain);
   assert.ok(filtered.includes('big.com'));assert.ok(!filtered.includes('small.com'));
   const offer=(await call('/offers?domain=big.com','GET',undefined,member)).data.offers[0];
-  assert.deepEqual([offer.price,offer.marketplace,offer.url,'cost' in offer],[150,'FatGrid','',false]);
+  assert.deepEqual([offer.price,offer.marketplace,offer.url,'cost' in offer],[150,'The Sponsored Post','',false]);
   const adminOffer=(await call('/offers?domain=big.com','GET',undefined,admin)).data.offers[0];
   assert.deepEqual([adminOffer.price,adminOffer.cost,adminOffer.marketplace],[150,100,'Seller X']);
   assert.equal((await call('/offers?domain=techpulse.example','GET',undefined,member)).data.offers[0].marketplace,'Demo sample');
@@ -63,7 +63,7 @@ test('a markup is charged everywhere customers see a price, and the source stays
   const csv=(await call('/export','POST',{domains:['big.com']},member)).data;assert.match(csv.split('\r\n')[1],/^"big\.com","150"/);
   assert.equal((await call('/orders','POST',{offer_id:offer.id,content:'Article content long enough.',target_url:'https://buyer.com/',anchor:'buyer'},member)).status,201);
   const mine=(await call('/orders','GET',undefined,member)).data.rows[0];
-  assert.deepEqual([mine.price,mine.marketplace,'cost' in mine],[150,'FatGrid',false]);
+  assert.deepEqual([mine.price,mine.marketplace,'cost' in mine],[150,'The Sponsored Post',false]);
   const all=(await call('/admin/orders','GET',undefined,admin)).data.rows[0];
   assert.deepEqual([all.price,all.cost,all.marketplace],[150,100,'Seller X']);
  }finally{db.close()}

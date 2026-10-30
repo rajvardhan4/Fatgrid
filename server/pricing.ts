@@ -23,10 +23,10 @@ export function sellRow<T extends Row>(row:T,p:Pricing):T{
 }
 export function sellOffer(offer:Row,p:Pricing){
  const sold=sellRow(offer,p);
- return hideSource(p)&&!isDemo(offer)?{...sold,marketplace:'FatGrid',url:''}:sold;
+ return hideSource(p)&&!isDemo(offer)?{...sold,marketplace:'The Sponsored Post',url:''}:sold;
 }
 // Orders keep the real marketplace and cost for the admin; customers see neither while a markup applies.
 export function customerOrder(order:Row,p:Pricing){
  const {cost,...rest}=order;
- return p.admin?order:hideSource(p)?{...rest,marketplace:'FatGrid'}:rest;
+ return p.admin?order:hideSource(p)?{...rest,marketplace:'The Sponsored Post'}:rest;
 }

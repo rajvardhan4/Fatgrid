@@ -1,2 +1,2 @@
-export const metadata = { title: 'Page not found — FatGrid' };
-export default function NotFound() {return <div className="auth-page"><a className="brand" href="/"><img src="/brand/logo.png" alt="FatGrid"/></a><div className="auth-card not-found"><h1>Page not found</h1><p>The page you are looking for does not exist or has moved.</p><a className="button primary wide" href="/">Go to Price Finder</a></div></div>}
+export const metadata = { title: 'Page not found — The Sponsored Post' };
+export default function NotFound() {return <div className="auth-page"><a className="brand" href="/"><img src="/brand/logo.png" alt="The Sponsored Post"/></a><div className="auth-card not-found"><h1>Page not found</h1><p>The page you are looking for does not exist or has moved.</p><a className="button primary wide" href="/">Go to Price Finder</a></div></div>}
