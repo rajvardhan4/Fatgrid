@@ -388,3 +388,8 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .filters .two-up label{margin:0}
 .filters>div{display:flex;flex-direction:column;gap:2px}
 .filters>div>label:last-child,.filters>div>.two-up:last-child{margin-bottom:0}
+/* Hover tips keep normal case, and the publisher cell rises above the price column while hovered so tips are not cut. */
+[data-tip]:after{text-transform:none;letter-spacing:0}
+.publisher-table td.sticky-domain:hover,.publisher-table td.sticky-domain:focus-within{z-index:9}
+.publisher-table .demo-badge[data-tip]:after{top:calc(100% + 7px);bottom:auto;left:0;transform:translateY(-4px)}
+.publisher-table .demo-badge[data-tip]:hover:after{transform:none}
