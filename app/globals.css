@@ -366,3 +366,25 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .row-menu .blacklist,.row-menu .blacklist svg{color:#c9181f}
 .publisher-table .publisher-actions .row-menu .is-set{background:#f7f8fa}
 .publisher-table .publisher-actions .row-menu .is-set svg:last-child{color:#157a44}
+/* Marketplaces table box: rises with the page, stops 16px from the top (level with the sidebar card),
+   then its rows scroll natively under a CSS-sticky header. */
+@media(min-width:961px){
+.inventory-main .results{max-height:var(--box-h,calc(100dvh - 120px));display:flex;flex-direction:column;overflow:hidden}
+.inventory-main .results .table-wrap{flex:1 1 auto;min-height:0;max-height:none;overflow-x:auto;overflow-y:hidden;overscroll-behavior-y:auto;scrollbar-gutter:stable}
+.inventory-main .results .table-wrap.locked{overflow-y:auto}
+.inventory-main .results .pagination{flex:none}
+}
+.publisher-table thead tr:not(.group-row) th{top:0}
+.publisher-table thead tr:not(.group-row) th:first-child{border-top-left-radius:14px}
+.publisher-table thead tr:not(.group-row) th:last-child{border-top-right-radius:14px}
+/* Row buttons in brand colours. */
+.publisher-table .publisher-actions .boxed:nth-of-type(1){background:var(--selection);color:var(--accent)}
+.publisher-table .publisher-actions .boxed.is-set:nth-of-type(1){background:var(--accent);color:#fff;box-shadow:0 4px 10px #ed1c2433}
+.publisher-table .publisher-actions .boxed:nth-of-type(1):hover{background:#fff;border-color:var(--accent);color:var(--accent)}
+.publisher-table .publisher-actions .row-menu .is-set svg:last-child{color:var(--accent)}
+.row-menu .maybe svg{color:#f6921e}
+/* Filter cards: Restricted and Niche share a row so every card has two rows and no empty bottom. */
+.filters .two-up{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.filters .two-up label{margin:0}
+.filters>div{display:flex;flex-direction:column;gap:2px}
+.filters>div>label:last-child,.filters>div>.two-up:last-child{margin-bottom:0}

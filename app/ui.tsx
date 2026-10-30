@@ -38,8 +38,13 @@ const chips=(v:any)=>String(v||'').split(/[,|;]/).map(x=>x.trim()).filter(Boolea
 export function DataTable({data,compare=false,rank=false}:{data:Row[],compare?:boolean,rank?:boolean}){const {selected,setSelected,shown,filters,change,openOffers,decisions,saveDecision,user,selectedProject,setModal,action,notify,pageLoading,projects,signIn,route,setError}=useWorkspace(),wrap=useRef<HTMLDivElement>(null),[menu,setMenu]=useState<{domain:string,up:boolean}|null>(null);
  // The row's ⋯ menu closes on any click outside it or on Escape.
  useEffect(()=>{if(!menu)return;const click=(e:MouseEvent)=>{if(!(e.target as Element).closest?.('.row-menu,.menu-toggle'))setMenu(null)},key=(e:KeyboardEvent)=>{if(e.key==='Escape')setMenu(null)};document.addEventListener('click',click);document.addEventListener('keydown',key);return()=>{document.removeEventListener('click',click);document.removeEventListener('keydown',key)}},[menu]);
- // The table scrolls with the page; its header row is pushed down to sit just under the floating page header.
- useEffect(()=>{const el=wrap.current;if(!el)return;const update=()=>{const head=document.querySelector('.shell>header');const bottom=head?Math.max(0,head.getBoundingClientRect().bottom):0;el.style.setProperty('--sticky-top',Math.max(0,bottom-el.getBoundingClientRect().top)+'px')};update();addEventListener('scroll',update,{passive:true});addEventListener('resize',update);return()=>{removeEventListener('scroll',update);removeEventListener('resize',update)}},[]);
+ // On Marketplaces the table box scrolls up with the page and stops near the top; only then does the wheel
+ // scroll its rows (natively, under a CSS-sticky header). Before that the box ignores vertical scrolling.
+ useEffect(()=>{const el=wrap.current,box=el?.closest('.inventory-main .results') as HTMLElement|null;if(!el||!box)return;const STOP=16;
+  // Size the box so that at the end of the page its top sits STOP px below the window top.
+  const size=()=>{const below=document.documentElement.scrollHeight-(box.getBoundingClientRect().bottom+scrollY);box.style.setProperty('--box-h',Math.max(380,innerHeight-STOP-below)+'px')};
+  const update=()=>{el.classList.toggle('locked',box.getBoundingClientRect().top<=STOP+1)};
+  const resize=()=>{size();update()};resize();addEventListener('scroll',update,{passive:true});addEventListener('resize',resize);return()=>{removeEventListener('scroll',update);removeEventListener('resize',resize)}},[]);
  const projectName=projects.find((p:Row)=>p.id===selectedProject)?.name;
  // + ? − need a project: without an active one they open a picker instead of failing quietly. A second click clears the mark.
  const decide=(domain:string,key:string)=>{if(!user){signIn();return}if(key!=='blacklist'&&!selectedProject){setModal({type:'pickProject',domain,decision:key});return}const clear=decided(domain,key);saveDecision(domain,{decision:clear?'':key}).catch((e:Error)=>setError(e.message));notify(clear?'Mark removed.':key==='yes'?`${domain} added to ${projectName}.`:key==='blacklist'?`${domain} blacklisted everywhere.`:`${domain} marked as ${key==='maybe'?'maybe':'not a fit'} in ${projectName}.`)};
