@@ -428,3 +428,5 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .bulk-bar b{color:var(--accent)}
 .bulk-bar .bulk-spacer{flex:1}
 .bulk-bar .danger{display:inline-flex;align-items:center;gap:6px}
+.admin-inventory .section-bar .remove-all{display:inline-flex;align-items:center;gap:6px;margin-left:auto;margin-right:10px}
+.admin-inventory .section-bar .remove-all{display:inline-flex;align-items:center;gap:6px;margin-left:8px;white-space:nowrap}
