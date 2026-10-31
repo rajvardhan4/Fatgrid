@@ -421,3 +421,10 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .project-menu .menu-error{margin:8px 6px 2px;padding:8px 10px;border-radius:8px;background:#fff3f3;color:#b3372e;font-size:12px;font-weight:600;white-space:normal;line-height:1.4}
 .project-menu .menu-error a{color:var(--accent);text-decoration:underline}
 .publisher-table .publisher-actions .project-menu .menu-new button:disabled{opacity:.7;cursor:progress}
+/* Admin inventory: pick rows to remove several publishers at once. */
+.admin-inventory th.pick,.admin-inventory td.pick{width:44px;padding-left:14px;padding-right:0}
+.admin-inventory tr.picked td{background:var(--selection)}
+.bulk-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border:1px solid #fbc6c8;border-radius:12px;background:#fff5f5;font-size:14px;animation:menu-in .16s ease}
+.bulk-bar b{color:var(--accent)}
+.bulk-bar .bulk-spacer{flex:1}
+.bulk-bar .danger{display:inline-flex;align-items:center;gap:6px}

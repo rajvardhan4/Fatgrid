@@ -388,6 +388,16 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="inventory.csv"','Cache-Control':'no-store'}});
       }
       // Removing a publisher hides its offers from Marketplaces and Price Finder; existing orders keep their offer.
+      // Bulk removal: the selected domains, or every listed publisher matching the admin's search. Offers are deactivated, not deleted.
+      if(path==='/api/admin/publishers/remove'&&method==='POST'){
+        const d=await body(request,z.object({domains:z.array(z.string().max(253)).min(1).max(1000).optional(),all:z.boolean().optional(),q:z.string().max(253).default('')}));
+        let where:string,args:unknown[];
+        if(d.all){where='domain LIKE ?';args=['%'+d.q+'%']}
+        else{const list=[...new Set((d.domains||[]).map(x=>normalizeDomain(x)).filter(Boolean))];if(!list.length)throw new ApiError(400,'Choose at least one publisher.');where=`domain IN (${list.map(()=>'?').join(',')})`;args=list}
+        const removed=Number((await db.first(`SELECT COUNT(DISTINCT domain) AS n FROM offers WHERE active=1 AND ${where}`,args))?.n||0);
+        await db.run(`UPDATE offers SET active=0 WHERE active=1 AND ${where}`,args);
+        return json({removed});
+      }
       const publisherMatch=path.match(/^\/api\/admin\/publishers\/([^/]+)$/);
       if(publisherMatch&&method==='DELETE'){const d=normalizeDomain(decodeURIComponent(publisherMatch[1]));if(!d||!await db.run('UPDATE offers SET active=0 WHERE domain=? AND active=1',[d]))throw new ApiError(404,'Publisher not found in the marketplace.');return json({ok:true});}
       if(path==='/api/admin/settings'){

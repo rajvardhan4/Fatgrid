@@ -67,3 +67,22 @@ test('a full 250-row chunk is saved with one statement per table, later duplicat
   assert.equal((await db.first("SELECT price FROM offers WHERE domain='site0.com' AND marketplace='M1'"))!.price,999);
  }finally{db.close()}
 });
+
+test('admins remove several publishers at once, or everything matching a search',async()=>{
+ const db=await openDatabase(':memory:'),call=caller(db);
+ try{
+  const admin=(await call('/auth/register','POST',{email:'admin@example.com',password:'admin-pass-123'})).cookie;
+  const member=(await call('/auth/register','POST',{email:'member@example.com',password:'member-pass-123'})).cookie;
+  await db.run("UPDATE users SET role='admin' WHERE email='admin@example.com'");
+  await call('/admin/inventory','POST',{rows:['a.com','b.com','c.com','shop-a.net','shop-b.net'].map(domain=>({domain,price:10}))},admin);
+  const total=async()=>(await call('/inventory?type=All')).data.total;
+  assert.equal((await call('/admin/publishers/remove','POST',{domains:['a.com']},member)).status,403);
+  assert.equal((await call('/admin/publishers/remove','POST',{domains:['not a domain']},admin)).status,400);
+  assert.deepEqual((await call('/admin/publishers/remove','POST',{domains:['a.com','B.com','a.com','missing.com']},admin)).data,{removed:2});
+  assert.equal(await total(),3);
+  assert.deepEqual((await call('/admin/publishers/remove','POST',{all:true,q:'shop-'},admin)).data,{removed:2});
+  assert.deepEqual((await call('/inventory?type=All')).data.rows.map((r:any)=>r.domain),['c.com']);
+  assert.deepEqual((await call('/admin/publishers/remove','POST',{all:true,q:''},admin)).data,{removed:1});
+  assert.equal(await total(),0);
+ }finally{db.close()}
+});
