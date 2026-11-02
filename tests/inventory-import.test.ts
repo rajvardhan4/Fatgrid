@@ -52,7 +52,7 @@ test('admins check, import, export and remove their own inventory',async()=>{
  }finally{db.close()}
 });
 
-test('a full 250-row chunk is saved with one statement per table, later duplicates winning',async()=>{
+test('a full 250-row chunk is saved in three statements, later duplicates winning',async()=>{
  const db=await openDatabase(':memory:'),call=caller(db);
  try{
   const admin=(await call('/auth/register','POST',{email:'admin@example.com',password:'admin-pass-123'})).cookie;
@@ -61,7 +61,7 @@ test('a full 250-row chunk is saved with one statement per table, later duplicat
   const rows:any[]=Array.from({length:250},(_,i)=>({domain:`site${i%200}.com`,marketplace:i<200?'M1':'M2',price:10+i,dr:String(i%100)}));
   rows[249]={domain:'site0.com',marketplace:'M1',price:999};
   const r=await call('/admin/inventory','POST',{rows},admin);
-  assert.equal(r.status,200);assert.deepEqual(sizes,[2]);
+  assert.equal(r.status,200);assert.deepEqual(sizes,[3]); // upload-order reset, publishers, offers
   const status=(await call('/admin/status','GET',undefined,admin)).data;
   assert.deepEqual([status.publishers,status.offers],[200,249]);
   assert.equal((await db.first("SELECT price FROM offers WHERE domain='site0.com' AND marketplace='M1'"))!.price,999);
