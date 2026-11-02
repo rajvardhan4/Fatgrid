@@ -5,7 +5,7 @@ import { googleAuthURL, googleConfigured, googleProfile } from './google';
 import type { Database, Row, Statement } from './db';
 import { csvCell, isDemo, normalizeDomain, parseDomains, parseNiches } from '../shared/domain';
 import { clearDemo, demoCount, loadDemo } from './demo';
-import { costFor, customerOrder, customerPrice, hideSource, loadSettings, saveSettings, sellOffer, sellRow, type Pricing } from './pricing';
+import { costFor, customerOrder, customerPrice, hideSource, loadSettings, planMarkup, saveSettings, sellOffer, sellRow, type Pricing } from './pricing';
 import { inspectBacklink, providerStatus, publicURL, scanProvider, backlinkSummary, type PublicFetch } from './providers';
 import { billingPortal, checkout, stripeWebhook } from './billing';
 import { groupApi, processGroups } from './monitoring';
@@ -123,9 +123,9 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     const user=await authenticate(request,db,env);
     let cached:Promise<Awaited<ReturnType<typeof loadSettings>>>|undefined;
     const settings=()=>cached??=loadSettings(db);
-    const pricing=async():Promise<Pricing>=>({markup:(await settings()).markup,admin:user?.role==='admin'});
+    const pricing=async():Promise<Pricing>=>({markup:planMarkup(await settings(),user?.plan),admin:user?.role==='admin'});
     const scannersOn=env.FEATURE_SCANNERS==='1';
-    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start'],features:{scanners:scannersOn}});
+    if(path==='/api/session'&&method==='GET')return json({user:safeUser(user),authMode:env.AUTH_MODE||'local',providers:providerStatus(env),limits:limits[user?.plan||'start'],features:{scanners:scannersOn},planMarkup:{pro:(await settings()).markupPro,advanced:(await settings()).markupAdvanced}});
     if(path==='/api/health')return json({ok:!!await db.first('SELECT 1 AS ok'),database:'connected'});
     if(path.startsWith('/api/auth/')){
       if(env.AUTH_MODE==='platform')throw new ApiError(409,'Use the secure ChatGPT sign-in link on this hosted version.');
@@ -402,7 +402,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
       if(publisherMatch&&method==='DELETE'){const d=normalizeDomain(decodeURIComponent(publisherMatch[1]));if(!d||!await db.run('UPDATE offers SET active=0 WHERE domain=? AND active=1',[d]))throw new ApiError(404,'Publisher not found in the marketplace.');return json({ok:true});}
       if(path==='/api/admin/settings'){
         if(method==='GET')return json(await settings());
-        if(method==='PUT'){const d=await body(request,z.object({markup:z.coerce.number().min(0,'The markup cannot be negative.').max(500,'Use a markup of 500% or less.')}));await saveSettings(db,{markup:Math.round(d.markup*100)/100});return json(await loadSettings(db));}
+        if(method==='PUT'){const pct=z.coerce.number().min(0,'The markup cannot be negative.').max(500,'Use a markup of 500% or less.');const d=await body(request,z.object({markupPro:pct,markupAdvanced:pct}));await saveSettings(db,{markupPro:Math.round(d.markupPro*100)/100,markupAdvanced:Math.round(d.markupAdvanced*100)/100});return json(await loadSettings(db));}
       }
       if(path==='/api/admin/orders'&&method==='GET')return json({rows:await db.all('SELECT o.*,u.email FROM orders o JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC')});
       if(path==='/api/admin/quotes'&&method==='GET')return json({rows:await db.all('SELECT q.*,u.email FROM quote_requests q JOIN users u ON u.id=q.user_id ORDER BY q.created_at DESC')});

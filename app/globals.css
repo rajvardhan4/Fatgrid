@@ -430,3 +430,7 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .bulk-bar .danger{display:inline-flex;align-items:center;gap:6px}
 .admin-inventory .section-bar .remove-all{display:inline-flex;align-items:center;gap:6px;margin-left:auto;margin-right:10px}
 .admin-inventory .section-bar .remove-all{display:inline-flex;align-items:center;gap:6px;margin-left:8px;white-space:nowrap}
+/* Paid plans: the managed-service markup, explained on the card. */
+.plan .managed-note{display:flex;flex-direction:column;gap:4px;margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--selection);border:1px solid #fbc6c8}
+.plan .managed-note b{color:var(--accent);font-size:14px}
+.plan .managed-note span{color:var(--muted);font-size:12.5px;line-height:1.45}

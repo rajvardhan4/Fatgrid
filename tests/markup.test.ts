@@ -23,7 +23,7 @@ test('scanners stay hidden unless the server switches them on',async()=>{
   }
   assert.equal((await call('/scans','GET',undefined,member)).status,200);
   // The admin settings no longer switch scanners on, even if asked to.
-  assert.deepEqual((await call('/admin/settings','PUT',{markup:0,scanners:true},admin)).data,{markup:0});
+  assert.deepEqual((await call('/admin/settings','PUT',{markupPro:0,markupAdvanced:0,scanners:true},admin)).data,{markupPro:0,markupAdvanced:0});
   await db.run("INSERT INTO app_settings (key,value) VALUES ('scanners','1')");
   assert.equal((await call('/session','GET',undefined,member)).data.features.scanners,false);
   const on=caller(db,{...env,FEATURE_SCANNERS:'1'});
@@ -42,10 +42,18 @@ test('a markup is charged everywhere customers see a price, and the source stays
   await call('/admin/demo','POST',{action:'load'},admin);
   // Without a markup, nothing changes.
   assert.equal((await call('/offers?domain=big.com','GET',undefined,member)).data.offers[0].marketplace,'Seller X');
-  assert.equal((await call('/admin/settings','PUT',{markup:-5},admin)).status,400);
-  assert.equal((await call('/admin/settings','PUT',{markup:50},member)).status,403);
-  assert.deepEqual((await call('/admin/settings','PUT',{markup:50},admin)).data,{markup:50});
-  assert.equal((await call('/admin/settings','GET',undefined,admin)).data.markup,50);
+  // Defaults: Free pays listed prices; Pro and Advanced pay a 50% managed-service markup.
+  assert.deepEqual((await call('/admin/settings','GET',undefined,admin)).data,{markupPro:50,markupAdvanced:50});
+  assert.equal((await call('/admin/settings','PUT',{markupPro:-5,markupAdvanced:50},admin)).status,400);
+  assert.equal((await call('/admin/settings','PUT',{markupPro:50,markupAdvanced:50},member)).status,403);
+  assert.deepEqual((await call('/admin/settings','PUT',{markupPro:50,markupAdvanced:80},admin)).data,{markupPro:50,markupAdvanced:80});
+  assert.deepEqual((await call('/session','GET',undefined,member)).data.planMarkup,{pro:50,advanced:80});
+  const free=await login(db,'free@example.com'),rich=await login(db,'rich@example.com');
+  await db.run("UPDATE users SET plan='pro' WHERE email='buyer@example.com'");await db.run("UPDATE users SET plan='advanced' WHERE email='rich@example.com'");
+  const freeOffer=(await call('/offers?domain=big.com','GET',undefined,free)).data.offers[0];
+  assert.deepEqual([freeOffer.price,freeOffer.marketplace],[100,'Seller X']);
+  assert.equal((await call('/offers?domain=big.com','GET',undefined,rich)).data.offers[0].price,180);
+  assert.equal((await call('/offers?domain=big.com','GET',undefined)).data.offers[0].price,100);
   const list=(await call('/inventory?type=All&q=.com&size=100','GET',undefined,member)).data.rows;
   const big=list.find((r:any)=>r.domain==='big.com'),small=list.find((r:any)=>r.domain==='small.com');
   assert.equal(big.price,150);assert.equal(small.price,23);assert.equal('cost' in big,false);
@@ -54,7 +62,8 @@ test('a markup is charged everywhere customers see a price, and the source stays
   const offer=(await call('/offers?domain=big.com','GET',undefined,member)).data.offers[0];
   assert.deepEqual([offer.price,offer.marketplace,offer.url,'cost' in offer],[150,'The Sponsored Post','',false]);
   const adminOffer=(await call('/offers?domain=big.com','GET',undefined,admin)).data.offers[0];
-  assert.deepEqual([adminOffer.price,adminOffer.cost,adminOffer.marketplace],[150,100,'Seller X']);
+  // The admin's own account is on the free plan, so it sees listed prices; costs and sources stay visible.
+  assert.deepEqual([adminOffer.price,adminOffer.cost,adminOffer.marketplace],[100,100,'Seller X']);
   assert.equal((await call('/offers?domain=techpulse.example','GET',undefined,member)).data.offers[0].marketplace,'Demo sample');
   assert.deepEqual((await call('/inventory/options','GET',undefined,member)).data.marketplaces,[]);
   assert.ok((await call('/inventory/options','GET',undefined,admin)).data.marketplaces.length>0);
