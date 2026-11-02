@@ -92,7 +92,7 @@ test('the marketplace lists publishers in upload order unless another sort is ch
  try{
   const admin=(await call('/auth/register','POST',{email:'admin@example.com',password:'admin-pass-123'})).cookie;
   await db.run("UPDATE users SET role='admin' WHERE email='admin@example.com'");
-  const list=async(q='')=>(await call('/inventory?type=All'+q)).data.rows.map((r:any)=>r.domain);
+  const list=async(q='&sort=position')=>(await call('/inventory?type=All'+q)).data.rows.map((r:any)=>r.domain);
   await call('/admin/inventory','POST',{rows:[{domain:'zeta.com',price:30},{domain:'alpha.com',price:10},{domain:'zeta.com',marketplace:'Other',price:20}]},admin);
   await call('/admin/inventory','POST',{rows:[{domain:'mid.com',price:50}]},admin);
   assert.deepEqual(await list(),['zeta.com','alpha.com','mid.com']);
@@ -103,5 +103,33 @@ test('the marketplace lists publishers in upload order unless another sort is ch
   await call('/admin/publishers/remove','POST',{all:true,q:''},admin);
   await call('/admin/inventory','POST',{rows:[{domain:'mid.com',price:50},{domain:'zeta.com',price:30}]},admin);
   assert.deepEqual(await list(),['mid.com','zeta.com']);
+ }finally{db.close()}
+});
+
+test('re-importing a publisher replaces its offers instead of piling them up',async()=>{
+ const db=await openDatabase(':memory:'),call=caller(db);
+ try{
+  const admin=(await call('/auth/register','POST',{email:'admin@example.com',password:'admin-pass-123'})).cookie;
+  await db.run("UPDATE users SET role='admin' WHERE email='admin@example.com'");
+  const markets=async()=>(await call('/offers?domain=big.com')).data.offers.map((o:any)=>o.marketplace).sort();
+  const send=(rows:any[],extra:any={})=>call('/admin/inventory','POST',{rows,...extra},admin);
+  await send([{domain:'big.com',marketplace:'M1',price:10},{domain:'big.com',marketplace:'M2',price:20},{domain:'other.com',marketplace:'M1',price:5}]);
+  const since=async(rows:any[])=>(await send(rows,{dryRun:true})).data.now;
+  // A new upload in replace mode leaves only the file's offers for that publisher; other publishers are untouched.
+  let s=await since([{domain:'big.com',marketplace:'M3',price:30}]);
+  await new Promise(r=>setTimeout(r,5));
+  await send([{domain:'big.com',marketplace:'M3',price:30}],{replaceSince:s});
+  assert.deepEqual(await markets(),['M3']);
+  assert.equal((await call('/offers?domain=other.com')).data.offers.length,1);
+  // Two chunks of one upload both keep their offers.
+  s=await since([{domain:'big.com',marketplace:'M4',price:40}]);
+  await new Promise(r=>setTimeout(r,5));
+  await send([{domain:'big.com',marketplace:'M4',price:40}],{replaceSince:s});
+  await new Promise(r=>setTimeout(r,5));
+  await send([{domain:'big.com',marketplace:'M5',price:50}],{replaceSince:s});
+  assert.deepEqual(await markets(),['M4','M5']);
+  // Without replace mode, offers are added or updated and the rest stay.
+  await send([{domain:'big.com',marketplace:'M6',price:60}]);
+  assert.deepEqual(await markets(),['M4','M5','M6']);
  }finally{db.close()}
 });
