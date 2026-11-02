@@ -1,0 +1,1 @@
+ALTER TABLE `publishers` ADD `seq` integer;

@@ -57,6 +57,13 @@
       "when": 1793178099442,
       "tag": "0007_markup_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793618323851,
+      "tag": "0008_publisher_upload_order",
+      "breakpoints": true
     }
   ]
 }

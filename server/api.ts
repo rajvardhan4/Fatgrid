@@ -92,12 +92,12 @@ async function inventory(db:Database,search:URLSearchParams,pricing:Pricing,user
   for(const [param,column,op] of [['minPrice','o.price','>='],['maxPrice','o.price','<='],['minTraffic','p.traffic','>='],['maxTraffic','p.traffic','<='],['minDR','p.dr','>='],['maxDR','p.dr','<='],['minAS','p.authority','>='],['maxAS','p.authority','<=']] as const){const v=search.get(param);if(v!==null&&v!==''&&Number.isFinite(Number(v))){where.push(`${column}${op}?`);args.push(column==='o.price'?costFor(Number(v),pricing.markup):Number(v))}}
   const niche=search.get('niche');if(niche&&/^[a-z]{2,20}$/.test(niche)){where.push("CONCAT(',',p.niches,',') LIKE ?");args.push('%,'+niche+',%')}
   for(const key of ['sponsored','restricted']){const v=search.get(key);if(v==='0'||v==='1'){where.push(`o.${key}=?`);args.push(Number(v))}}
-  const sorts:Record<string,string>={domain:'p.domain',price:'price',traffic:'p.traffic',authority:'p.authority',dr:'p.dr',offers:'offers'};
-  const sort=sorts[search.get('sort')||'domain']||'p.domain',dir=search.get('direction')==='desc'?'DESC':'ASC';
+  const sorts:Record<string,string>={position:'p.seq',domain:'p.domain',price:'price',traffic:'p.traffic',authority:'p.authority',dr:'p.dr',offers:'offers'};
+  const sort=sorts[search.get('sort')||'position']||'p.seq',dir=search.get('direction')==='desc'?'DESC':'ASC';
   const page=Math.max(1,Math.min(100000,Number(search.get('page'))||1)),size=Math.max(1,Math.min(100,Number(search.get('size'))||25));
   const condition=' WHERE '+where.join(' AND ');
   const count=await db.first('SELECT COUNT(DISTINCT p.domain) AS count FROM publishers p JOIN offers o ON o.domain=p.domain AND o.active=1'+condition,args);
-  const rows=await db.all(inventorySelect+condition+` GROUP BY p.domain ORDER BY ${sort} ${dir},p.domain ASC LIMIT ? OFFSET ?`,[...args,size,(page-1)*size]);
+  const rows=await db.all(inventorySelect+condition+` GROUP BY p.domain ORDER BY ${sort==='p.seq'?'p.seq IS NULL,':''}${sort} ${dir},p.domain ASC LIMIT ? OFFSET ?`,[...args,size,(page-1)*size]);
   return {rows:rows.map(r=>sellRow(r,pricing)),total:count!.count,page,size};
 }
 export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFetch):Promise<Response>{
@@ -199,7 +199,7 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
     const grouped=await groupApi(request,db,env,safeFetch,user);if(grouped!==undefined)return json(grouped);
     if(path==='/api/preferences'){
       if(method==='GET')return json(Object.fromEntries((await db.all('SELECT key,value FROM preferences WHERE user_id=?',[user.id])).map(r=>[r.key,JSON.parse(r.value)])));
-      if(method==='POST'){const d=await body(request,z.object({key:z.enum(['columns','presets','activeProject','dismissNotice','emailAlerts']),value:z.unknown()}));if(JSON.stringify(d.value).length>20000)throw new ApiError(400,'Preference is too large.');await db.run('INSERT INTO preferences (user_id,key,value) VALUES (?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[user.id,d.key,JSON.stringify(d.value)]);return json({ok:true});}
+      if(method==='POST'){const d=await body(request,z.object({key:z.enum(['columns','pinned','presets','activeProject','dismissNotice','emailAlerts']),value:z.unknown()}));if(JSON.stringify(d.value).length>20000)throw new ApiError(400,'Preference is too large.');await db.run('INSERT INTO preferences (user_id,key,value) VALUES (?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[user.id,d.key,JSON.stringify(d.value)]);return json({ok:true});}
     }
     if(path==='/api/account/password'&&method==='POST'){
       await rateLimit(db,'password:'+user.id,10,15*60000);
@@ -379,7 +379,9 @@ export async function api(request:Request,db:Database,env:Env,safeFetch:PublicFe
         // One INSERT per table for the whole chunk: a statement per row meant hundreds of round trips to the hosted
         // database, which ran past the 60-second function limit and came back as a non-JSON timeout page.
         const t=now(),places=(cols:number)=>valid.map(()=>'('+Array(cols).fill('?').join(',')+')').join(',');
-        await db.batch([{sql:'INSERT INTO publishers (domain,title,category,language,country,authority,dr,traffic,referring_domains,traffic_top,all_traffic_top,all_traffic,monthly_min,updated_at,metrics_source,niches) VALUES '+places(16)+' ON CONFLICT(domain) DO UPDATE SET title=excluded.title,category=excluded.category,language=excluded.language,country=excluded.country,authority=excluded.authority,dr=excluded.dr,traffic=excluded.traffic,referring_domains=excluded.referring_domains,traffic_top=excluded.traffic_top,all_traffic_top=excluded.all_traffic_top,all_traffic=excluded.all_traffic,monthly_min=excluded.monthly_min,updated_at=excluded.updated_at,metrics_source=excluded.metrics_source,niches=excluded.niches',args:valid.flatMap(p=>[p.domain,p.title,p.category,p.language,p.country,p.authority,p.dr,p.traffic,p.referring_domains,p.traffic_top,p.all_traffic_top,p.all_traffic,p.monthly_min,t,p.metrics_source,p.niches])},
+        // Upload order: each domain keeps the position of its first row in the file (chunks arrive in order).
+        const base=Date.now()*1000,firstRow=new Map<string,number>();valid.forEach((p,i)=>{if(!firstRow.has(p.domain))firstRow.set(p.domain,base+i)});
+        await db.batch([{sql:'INSERT INTO publishers (domain,title,category,language,country,authority,dr,traffic,referring_domains,traffic_top,all_traffic_top,all_traffic,monthly_min,updated_at,metrics_source,niches,seq) VALUES '+places(17)+' ON CONFLICT(domain) DO UPDATE SET seq=CASE WHEN EXISTS(SELECT 1 FROM offers lo WHERE lo.domain=publishers.domain AND lo.active=1) THEN COALESCE(publishers.seq,excluded.seq) ELSE excluded.seq END,title=excluded.title,category=excluded.category,language=excluded.language,country=excluded.country,authority=excluded.authority,dr=excluded.dr,traffic=excluded.traffic,referring_domains=excluded.referring_domains,traffic_top=excluded.traffic_top,all_traffic_top=excluded.all_traffic_top,all_traffic=excluded.all_traffic,monthly_min=excluded.monthly_min,updated_at=excluded.updated_at,metrics_source=excluded.metrics_source,niches=excluded.niches',args:valid.flatMap(p=>[p.domain,p.title,p.category,p.language,p.country,p.authority,p.dr,p.traffic,p.referring_domains,p.traffic_top,p.all_traffic_top,p.all_traffic,p.monthly_min,t,p.metrics_source,p.niches,firstRow.get(p.domain)])},
          {sql:'INSERT INTO offers (id,domain,marketplace,price,type,follow,sponsored,restricted,url,updated_at) VALUES '+places(10)+' ON CONFLICT(domain,marketplace,type) DO UPDATE SET price=excluded.price,follow=excluded.follow,sponsored=excluded.sponsored,restricted=excluded.restricted,url=excluded.url,active=1,updated_at=excluded.updated_at',args:valid.flatMap(p=>[id(),p.domain,p.marketplace,p.price,p.type,p.follow,p.sponsored,p.restricted||(p.niches?1:0),p.url,t])}]);return json({imported:valid.length});
       }
       if(path==='/api/admin/inventory/export'&&method==='GET'){

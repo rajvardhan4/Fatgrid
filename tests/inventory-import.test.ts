@@ -86,3 +86,22 @@ test('admins remove several publishers at once, or everything matching a search'
   assert.equal(await total(),0);
  }finally{db.close()}
 });
+
+test('the marketplace lists publishers in upload order unless another sort is chosen',async()=>{
+ const db=await openDatabase(':memory:'),call=caller(db);
+ try{
+  const admin=(await call('/auth/register','POST',{email:'admin@example.com',password:'admin-pass-123'})).cookie;
+  await db.run("UPDATE users SET role='admin' WHERE email='admin@example.com'");
+  const list=async(q='')=>(await call('/inventory?type=All'+q)).data.rows.map((r:any)=>r.domain);
+  await call('/admin/inventory','POST',{rows:[{domain:'zeta.com',price:30},{domain:'alpha.com',price:10},{domain:'zeta.com',marketplace:'Other',price:20}]},admin);
+  await call('/admin/inventory','POST',{rows:[{domain:'mid.com',price:50}]},admin);
+  assert.deepEqual(await list(),['zeta.com','alpha.com','mid.com']);
+  assert.deepEqual(await list('&sort=domain'),['alpha.com','mid.com','zeta.com']);
+  // Re-importing a listed publisher keeps its place; after removal, a new upload sets a new order.
+  await call('/admin/inventory','POST',{rows:[{domain:'zeta.com',price:31}]},admin);
+  assert.deepEqual(await list(),['zeta.com','alpha.com','mid.com']);
+  await call('/admin/publishers/remove','POST',{all:true,q:''},admin);
+  await call('/admin/inventory','POST',{rows:[{domain:'mid.com',price:50},{domain:'zeta.com',price:30}]},admin);
+  assert.deepEqual(await list(),['mid.com','zeta.com']);
+ }finally{db.close()}
+});

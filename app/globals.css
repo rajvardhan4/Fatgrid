@@ -466,3 +466,27 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .offers-table .buy{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border-radius:999px}
 @media(max-width:760px){.offer-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.modal:has(.offers-dialog){padding:20px 16px}}
 .offer-metrics b{display:flex;align-items:center;gap:6px}
+/* Pinned columns: the last one casts a soft edge over the scrolling columns. */
+.publisher-table .pinned{position:sticky}
+.publisher-table td.pinned{z-index:2;background:#fff}
+.publisher-table .pin-edge{box-shadow:inset -1px 0 0 var(--line),8px 0 10px -8px rgba(6,19,34,.22)}
+.publisher-table thead th.pin-edge{box-shadow:inset -1px 0 0 #ffffff26}
+/* Column manager. */
+.modal:has(.columns-dialog){width:min(620px,96vw);padding:24px 0 18px}
+.columns-head{display:flex;align-items:baseline;gap:10px;padding:0 24px 14px;border-bottom:1px solid var(--line)}
+.columns-head h2{margin:0;font-size:20px}
+.columns-list{max-height:min(60vh,560px);overflow:auto;padding:8px 24px 12px}
+.columns-section{margin:12px 2px 6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.column-row{display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;transition:background-color .15s ease,border-color .15s ease,opacity .15s ease}
+.column-row:hover{border-color:#fbc6c8}
+.column-row.dragging{opacity:.5}
+.column-row.off label{color:var(--muted)}
+.column-row .grip{flex:none;color:var(--faint);cursor:grab}
+.column-row label.checkbox{flex:1;display:flex;align-items:center;gap:10px;margin:0;font-size:14px;font-weight:600;cursor:pointer}
+.column-moves{display:flex;gap:2px}
+.column-moves button{width:28px;height:28px;min-height:0;padding:0;border:0;border-radius:8px;background:transparent;color:var(--muted)}
+.column-moves button:hover{background:#f4f6fa;color:var(--ink)}
+.pin-toggle{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:700;color:var(--muted)}
+.pin-toggle.on{background:var(--selection);border-color:#fbc6c8;color:var(--accent)}
+.pin-toggle:disabled{opacity:.6}
+.columns-dialog .dialog-footer{margin:0;padding:14px 24px 0;border-top:1px solid var(--line);display:flex;gap:8px}
