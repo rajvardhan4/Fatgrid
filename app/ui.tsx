@@ -28,6 +28,9 @@ export function Empty({title='No results',children}:{title?:string,children?:Rea
 // Column groups shown above the headers, as in the marketplace table.
 const groups:Record<string,string>={offers:'Offer',type:'Offer',category:'Offer',title:'Offer',language:'Offer',authority:'Authority',dr:'Authority',referring_domains:'Authority',country:'Traffic',traffic_top:'Traffic',all_traffic_top:'Traffic',traffic:'Traffic',monthly_min:'Traffic',all_traffic:'Traffic',follow:'Links',sponsored:'Links',restricted:'Niches',updated_at:'Platform',notes:'Your data',ref_to:'Your data',projects:'Your data',competitors:'Your data',match_score:'Your data'};
 const nicheIcons:Record<string,any>={casino:Dices,cbd:Leaf,crypto:Bitcoin,dating:Heart,forex:ChartColumn,pharma:Pill,other:Link2};
+// Restricted niche icons for a comma-separated niche list, each with a hover tip.
+export function NicheIcons({niches}:{niches:string}){const list=String(niches||'').split(/[,|;]/).map(x=>x.trim()).filter(n=>nicheIcons[n]);if(!list.length)return null;return <span className="niche-icons">{list.map(n=>{const Icon=nicheIcons[n],label=NICHES.find(([k])=>k===n)?.[1]||n;return <span key={n} className="niche-icon" data-tip={`Accepts ${label}`} aria-label={label}><Icon size={15}/></span>})}</span>}
+export const ago=(v:string)=>{if(!v)return '—';const s=(Date.now()-new Date(v).getTime())/1000;if(!Number.isFinite(s))return '—';if(s<60)return 'just now';const m=s/60,h=m/60,d=h/24;return m<60?`${Math.floor(m)} min ago`:h<24?`${Math.floor(h)} h ago`:d<30?`${Math.floor(d)} day${Math.floor(d)===1?'':'s'} ago`:new Date(v).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})};
 const createdDate=(v:any)=>v?new Date(v).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}):'—';
 // Publisher, price and selection stay visible while the wide table scrolls sideways.
 const stickyClass:Record<string,string>={domain:'sticky sticky-domain',price:'sticky sticky-price'};
