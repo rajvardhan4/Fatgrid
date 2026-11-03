@@ -8,7 +8,7 @@ export function publicURL(input:string) {
   let u:URL;try{u=new URL(input)}catch{throw new ApiError(400,'Enter a valid public URL.');}
   const host=u.hostname.toLowerCase();
   // Literal IPs, local names and non-standard ports are never crawler targets.
-  if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.port&&!['80','443'].includes(u.port)||!normalizeDomain(host)||/^\d+\./.test(host)||/\.(local|internal|localhost|test|invalid|home|lan)$/i.test(host))throw new ApiError(400,'Only public HTTP(S) hostnames are supported.');
+  if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.port&&!['80','443'].includes(u.port)||!normalizeDomain(host)||/^\d+(\.\d+){3}$/.test(host)||/\.(local|internal|localhost|test|invalid|home|lan)$/i.test(host))throw new ApiError(400,'Only public HTTP(S) hostnames are supported.');
   return u;
 }
 export function isPublicIPv4(address:string){const p=address.split('.').map(Number);return p.length===4&&p.every(n=>Number.isInteger(n)&&n>=0&&n<=255)&&![0,10,127].includes(p[0])&&p[0]<224&&!(p[0]===169&&p[1]===254)&&!(p[0]===172&&p[1]>=16&&p[1]<=31)&&!(p[0]===192&&(p[1]===168||p[1]===0||p[1]===2))&&!(p[0]===100&&p[1]>=64&&p[1]<=127)&&!(p[0]===198&&(p[1]===18||p[1]===19||p[1]===51))&&!(p[0]===203&&p[1]===0&&p[2]===113);}
