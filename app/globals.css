@@ -108,7 +108,7 @@ html{scrollbar-gutter:stable}::-webkit-scrollbar{width:10px;height:8px}::-webkit
 .publisher-table [data-col=language]{min-width:100px}
 .publisher-table [data-col=authority],.publisher-table [data-col=dr]{min-width:60px}
 .publisher-table [data-col=referring_domains]{min-width:85px}
-.publisher-table [data-col=country]{min-width:200px}
+.publisher-table [data-col=country]{min-width:0;white-space:nowrap}
 .publisher-table [data-col=traffic_top],.publisher-table [data-col=all_traffic_top],.publisher-table [data-col=updated_at]{min-width:110px}
 .publisher-table [data-col=traffic],.publisher-table [data-col=monthly_min],.publisher-table [data-col=all_traffic]{min-width:95px}
 .publisher-table [data-col=follow]{min-width:90px}
@@ -490,3 +490,9 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .pin-toggle.on{background:var(--selection);border-color:#fbc6c8;color:var(--accent)}
 .pin-toggle:disabled{opacity:.6}
 .columns-dialog .dialog-footer{margin:0;padding:14px 24px 0;border-top:1px solid var(--line);display:flex;gap:8px}
+
+/* Offers popup: each restricted niche with its own price. */
+.niche-icons.with-prices{display:flex;flex-wrap:wrap;gap:6px;max-width:300px;white-space:normal;color:var(--ink)}
+.niche-icons.with-prices .niche-price{display:inline-flex;align-items:center;gap:5px;width:auto;height:auto;padding:3px 8px;border-radius:999px;background:var(--bg);font-size:12px;white-space:nowrap}
+.niche-icons.with-prices .niche-price svg{width:13px;height:13px;color:var(--accent)}
+.niche-price b{font-weight:700}

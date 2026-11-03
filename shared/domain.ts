@@ -36,3 +36,18 @@ export function parseNiches(value: unknown): string {
   const keys = String(value ?? '').toLowerCase().split(/[,;|]/).map(s => s.trim()).filter(Boolean).map(s => nicheAliases[s] || s);
   return [...new Set(keys.filter(k => allowed.includes(k)))].join(',');
 }
+// Prices for restricted niches, stored per offer as "casino:57,dating:191". Accepts that form or
+// "Casino: $57; Dating: $1,200". A niche listed twice keeps its lowest price.
+export function parseNichePrices(value: unknown): string {
+  const best: Record<string, number> = {};
+  for (const part of String(value ?? '').split(/[;|]|,(?=\s*[a-z])/i)) {
+    const m = part.match(/^\s*([a-z &]+?)\s*[:=]\s*[$€£]?\s*([\d,]+(?:\.\d+)?)\s*$/i);
+    if (!m) continue;
+    const niche = parseNiches(m[1].split(/\s*&\s*/)[0]), price = Number(m[2].replace(/,/g, ''));
+    if (niche && price > 0 && price <= 1000000 && !(best[niche] <= price)) best[niche] = price;
+  }
+  return NICHES.map(([k]) => k as string).filter(k => k in best).map(k => `${k}:${best[k]}`).join(',');
+}
+export function nichePrices(value: unknown): Record<string, number> {
+  return Object.fromEntries(parseNichePrices(value).split(',').filter(Boolean).map(p => { const [k, v] = p.split(':'); return [k, Number(v)]; }));
+}

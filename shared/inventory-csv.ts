@@ -1,3 +1,4 @@
+import { parseNiches, parseNichePrices } from './domain';
 // Turns a spreadsheet export into inventory rows the import API accepts. Column names are matched
 // loosely ("Best Price", "Publisher", "DR"...) and values such as "$1,200", "10.12K" or "Yes" are cleaned.
 const aliases: Record<string, string> = {
@@ -22,6 +23,9 @@ const aliases: Record<string, string> = {
   restricted: 'restricted',
   niches: 'niches', restrictedniches: 'niches',
   url: 'url', sampleurl: 'url', samplepost: 'url', link: 'url',
+  nicheprices: 'niche_prices', restrictednicheprices: 'niche_prices',
+  casinoprice: 'price_casino', gamblingprice: 'price_casino', cbdprice: 'price_cbd', cryptoprice: 'price_crypto', datingprice: 'price_dating',
+  forexprice: 'price_forex', financeprice: 'price_forex', tradingprice: 'price_forex', pharmaprice: 'price_pharma', otherprice: 'price_other',
   metricssource: 'metrics_source',
 };
 const numberFields = ['authority', 'dr', 'traffic', 'referring_domains', 'traffic_top', 'all_traffic_top', 'all_traffic', 'monthly_min'];
@@ -47,14 +51,19 @@ export function normalizeInventoryRows(rows: Record<string, string>[]) {
     for (const [header, field] of Object.entries(mapped)) {
       let v = String(raw[header] ?? '').trim();
       if (!v) continue;
+      // "Casino Price" style columns are gathered into niche_prices ("casino:57,dating:191").
+      if (field.startsWith('price_')) { const n = cleanNumber(v); if (Number(n) > 0) row.niche_prices = (row.niche_prices ? row.niche_prices + ',' : '') + field.slice(6) + ':' + n; continue; }
       if (field === 'price' || numberFields.includes(field)) v = cleanNumber(v);
       if (field === 'type') v = /insert/i.test(v) ? 'Link Insertion' : /guest|post/i.test(v) ? 'Guest Post' : v;
       if (field === 'follow') v = /no/i.test(v) ? 'nofollow' : /do|follow|yes/i.test(v) ? 'dofollow' : v.toLowerCase();
       if (field === 'sponsored' || field === 'restricted') v = yes(v);
       // A Restricted column that lists niches ("casino, crypto") fills niches and marks the offer restricted.
       if (field === 'restricted' && !/^[01]$/.test(v)) { row.niches = row.niches || v; v = '1'; }
-      row[field] = v;
+      row[field] = field === 'niche_prices' && row.niche_prices ? row.niche_prices + ',' + v : v;
     }
+    // A niche with a price is a niche the publisher accepts.
+    const priced = parseNichePrices(row.niche_prices);
+    if (priced) { row.niche_prices = priced; row.niches = parseNiches([row.niches, ...priced.split(',').map(p => p.split(':')[0])].join(',')); row.restricted = '1'; }
     return row;
   });
   return { rows: out, mapped, ignored, missing: ['domain', 'price'].filter(f => !Object.values(mapped).includes(f)) };

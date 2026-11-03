@@ -1,5 +1,5 @@
 import type {Database,Row} from './db';
-import {isDemo} from '../shared/domain';
+import {isDemo,nichePrices} from '../shared/domain';
 // Site settings an administrator changes in Administration. Scanners are switched on only on the server (FEATURE_SCANNERS=1).
 // The service markup depends on the customer's plan: Free sees publisher prices as listed; Pro and Advanced
 // pay a managed-service markup (50% unless an admin changes it) and the team handles the placement.
@@ -23,7 +23,9 @@ export const costFor=(price:number,markup:number)=>markup>0?price/(1+markup/100)
 export const hideSource=(p:Pricing)=>p.markup>0&&!p.admin;
 export function sellRow<T extends Row>(row:T,p:Pricing):T{
  if(!row||row.price==null)return row;
- return {...row,price:customerPrice(row.price,p.markup),...(p.admin?{cost:row.price}:{})};
+ // Restricted-niche prices get the same markup as the base price.
+ const niche_prices=row.niche_prices?Object.entries(nichePrices(row.niche_prices)).map(([k,v])=>`${k}:${customerPrice(v,p.markup)}`).join(','):row.niche_prices;
+ return {...row,price:customerPrice(row.price,p.markup),...(row.niche_prices!=null?{niche_prices}:{}),...(p.admin?{cost:row.price}:{})};
 }
 export function sellOffer(offer:Row,p:Pricing){
  const sold=sellRow(offer,p);

@@ -1,8 +1,8 @@
 'use client';
 import {createContext,useContext,useEffect,useLayoutEffect,useRef,useState,type FormEvent} from 'react';
 import {AlertCircle,ArrowUpDown,Folder,Star,HelpCircle,Ban,Copy,Plus,FolderPlus,ThumbsDown,StickyNote,MoreHorizontal,Check,Eye,ExternalLink,Dices,Leaf,Bitcoin,Heart,ChartColumn,Pill,Link2} from 'lucide-react';
-import {isDemo,NICHES} from '../shared/domain';
-import {flag} from '../shared/countries';
+import {isDemo,NICHES,nichePrices} from '../shared/domain';
+import {countryName,flag} from '../shared/countries';
 export type Row=Record<string,any>;
 export async function request(path:string,options:RequestInit={}){const r=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json',...options.headers},credentials:'same-origin'});if(!r.headers.get('content-type')?.includes('application/json'))throw new Error(r.status===404?'API route not deployed. Redeploy this project with the Next.js framework preset.':'The backend returned an invalid response. Check deployment logs.');const d=await r.json();if(!r.ok)throw new Error(d.error||'Unable to complete request');return d;}
 export const post=(path:string,data:unknown,method='POST')=>request(path,{method,body:JSON.stringify(data)});
@@ -28,8 +28,14 @@ export function Empty({title='No results',children}:{title?:string,children?:Rea
 // Column groups shown above the headers, as in the marketplace table.
 const groups:Record<string,string>={offers:'Offer',type:'Offer',category:'Offer',title:'Offer',language:'Offer',authority:'Authority',dr:'Authority',referring_domains:'Authority',country:'Traffic',traffic_top:'Traffic',all_traffic_top:'Traffic',traffic:'Traffic',monthly_min:'Traffic',all_traffic:'Traffic',follow:'Links',sponsored:'Links',restricted:'Niches',updated_at:'Platform',notes:'Your data',ref_to:'Your data',projects:'Your data',competitors:'Your data',match_score:'Your data'};
 const nicheIcons:Record<string,any>={casino:Dices,cbd:Leaf,crypto:Bitcoin,dating:Heart,forex:ChartColumn,pharma:Pill,other:Link2};
-// Restricted niche icons for a comma-separated niche list, each with a hover tip.
-export function NicheIcons({niches}:{niches:string}){const list=String(niches||'').split(/[,|;]/).map(x=>x.trim()).filter(n=>nicheIcons[n]);if(!list.length)return null;return <span className="niche-icons">{list.map(n=>{const Icon=nicheIcons[n],label=NICHES.find(([k])=>k===n)?.[1]||n;return <span key={n} className="niche-icon" data-tip={`Accepts ${label}`} aria-label={label}><Icon size={15}/></span>})}</span>}
+// Short niche names for tips ("Casino", "CBD", "Forex") and the tip itself, with the niche's price when known.
+// Niche prices read as whole dollars ("$57"), cents only when there are any.
+const nicheMoney=(v:number)=>'$'+v.toLocaleString('en-US',{maximumFractionDigits:2});
+export const nicheLabel=(n:string)=>(NICHES.find(([k])=>k===n)?.[1]||n).split(' & ')[0];
+const nicheTip=(n:string,price?:number)=>`Accepts ${nicheLabel(n)}`+(price?` (Price: ${nicheMoney(price)})`:'');
+// Restricted niche icons for a comma-separated niche list, each with a hover tip. With showPrices each niche
+// is listed with its own price ("Casino $57"), as in the offers popup.
+export function NicheIcons({niches,prices,showPrices}:{niches:string,prices?:string,showPrices?:boolean}){const price=nichePrices(prices),list=[...new Set([...String(niches||'').split(/[,|;]/).map(x=>x.trim()),...Object.keys(price)])].filter(n=>nicheIcons[n]);if(!list.length)return null;return <span className={'niche-icons'+(showPrices?' with-prices':'')}>{list.map(n=>{const Icon=nicheIcons[n];return showPrices?<span key={n} className="niche-price"><Icon size={14}/>{nicheLabel(n)}<b>{price[n]?nicheMoney(price[n]):'—'}</b></span>:<span key={n} className="niche-icon" data-tip={nicheTip(n,price[n])} aria-label={nicheLabel(n)}><Icon size={15}/></span>})}</span>}
 export const ago=(v:string)=>{if(!v)return '—';const s=(Date.now()-new Date(v).getTime())/1000;if(!Number.isFinite(s))return '—';if(s<60)return 'just now';const m=s/60,h=m/60,d=h/24;return m<60?`${Math.floor(m)} min ago`:h<24?`${Math.floor(h)} h ago`:d<30?`${Math.floor(d)} day${Math.floor(d)===1?'':'s'} ago`:new Date(v).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})};
 const createdDate=(v:any)=>v?new Date(v).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const compactKeys=['traffic','traffic_top','all_traffic_top','all_traffic','referring_domains','monthly_min'];
@@ -70,9 +76,9 @@ export function DataTable({data,compare=false,rank=false}:{data:Row[],compare?:b
   if(key==='notes')return <button className={'note-button '+(note(r.domain)?'has-note':'')} title={note(r.domain)||'Add a note'} onClick={()=>openNote(r.domain)}>{note(r.domain)||<><Plus size={12}/>Note</>}</button>;
   if(key==='language')return r.language?<span className="lang" title={r.language}>{chips(r.language).map(l=>l.slice(0,3)).join(', ')}</span>:'—';
   if(key==='updated_at')return <span className="num">{createdDate(r[key])}</span>;
-  if(key==='country')return r.country?<span className="country"><span className="flag" aria-hidden="true">{flag(r.country)}</span>{r.country}</span>:'—';
+  if(key==='country')return r.country?<span className="country"><span className="flag" aria-hidden="true">{flag(r.country)}</span>{countryName(r.country)}</span>:'—';
   if(key==='follow')return r.follow?<span className="follow">{chips(r.follow).join(' / ')}</span>:'—';
-  if(key==='restricted'){const list=chips(r.niches).filter(n=>nicheIcons[n]);return list.length?<span className="niche-icons">{list.map(n=>{const Icon=nicheIcons[n];const label=NICHES.find(([k])=>k===n)?.[1]||n;return route==='/inventory'?<button key={n} className={'niche-icon '+(filters.niche===n?'active':'')} data-tip={filters.niche===n?`Showing only ${label}. Click to clear`:`Accepts ${label}. Click to show only these`} aria-label={`Filter by ${label}`} onClick={()=>change('niche',filters.niche===n?'':n)}><Icon size={16}/></button>:<span key={n} className="niche-icon" data-tip={`Accepts ${label}`} aria-label={label}><Icon size={16}/></span>})}</span>:r.restricted==null?'—':Number(r.restricted)?'Yes':'—';}
+  if(key==='restricted'){const price=nichePrices(r.niche_prices),list=[...new Set([...chips(r.niches),...Object.keys(price)])].filter(n=>nicheIcons[n]);return list.length?<span className="niche-icons">{list.map(n=>{const Icon=nicheIcons[n],label=nicheLabel(n);return route==='/inventory'?<button key={n} className={'niche-icon '+(filters.niche===n?'active':'')} data-tip={filters.niche===n?`Showing only ${label}. Click to clear`:nicheTip(n,price[n])} aria-label={`Filter by ${label}`} aria-pressed={filters.niche===n} onClick={()=>change('niche',filters.niche===n?'':n)}><Icon size={16}/></button>:<span key={n} className="niche-icon" data-tip={nicheTip(n,price[n])} aria-label={label}><Icon size={16}/></span>})}</span>:r.restricted==null?'—':Number(r.restricted)?'Yes':'—';}
   if(key==='sponsored')return r[key]==null?'—':Number(r[key])?'Yes':'No';
   if(compactKeys.includes(key))return <span className="num">{compact(r[key])}</span>;
   if(['authority','dr'].includes(key))return <span className="num">{r[key]??'—'}</span>;

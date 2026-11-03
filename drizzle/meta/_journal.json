@@ -64,6 +64,13 @@
       "when": 1793618323851,
       "tag": "0008_publisher_upload_order",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793709207153,
+      "tag": "0009_niche_prices",
+      "breakpoints": true
     }
   ]
 }

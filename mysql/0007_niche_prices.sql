@@ -1,0 +1,1 @@
+ALTER TABLE `offers` ADD COLUMN `niche_prices` VARCHAR(500) DEFAULT '' NOT NULL;
