@@ -7,7 +7,8 @@ import {demoCount,loadDemo} from '../server/demo';
 Object.assign(process.env,{MYSQL_URL:'',MYSQL_SSL_CA:'',APP_ORIGIN:''});
 async function main(){
  const db=openDatabase();
- if(!await demoCount(db))console.log(`Loaded ${await loadDemo(db)} demo listings into data/fatgrid.sqlite.`);
+ const pubCount = Number((await db.first('SELECT COUNT(*) AS n FROM publishers'))?.n || 0);
+ if(!pubCount && !await demoCount(db))console.log(`Loaded ${await loadDemo(db)} demo listings into data/fatgrid.sqlite.`);
  db.close();
  console.log('Open http://127.0.0.1:3000 — this uses the local database only.');
  spawn('npm run dev',{stdio:'inherit',shell:true,env:process.env}).on('exit',code=>process.exit(code??0));
