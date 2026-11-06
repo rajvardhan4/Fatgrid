@@ -496,3 +496,11 @@ button.niche-icon:hover{transform:translateY(-2px);border-color:#f2d48a;box-shad
 .niche-icons.with-prices .niche-price{display:inline-flex;align-items:center;gap:5px;width:auto;height:auto;padding:3px 8px;border-radius:999px;background:var(--bg);font-size:12px;white-space:nowrap}
 .niche-icons.with-prices .niche-price svg{width:13px;height:13px;color:var(--accent)}
 .niche-price b{font-weight:700}
+
+/* Numbered pagination: separate bordered buttons, the current page highlighted. */
+.pagination .page-buttons{display:flex;align-items:center;gap:6px}
+.pagination .page-buttons button{margin:0;min-width:32px;min-height:32px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink);font-size:12px;font-weight:600}
+.pagination .page-buttons button:hover:not(:disabled):not(.chosen){background:#f7f8fa}
+.pagination .page-buttons button.chosen{background:var(--selection);border-color:#f9c4c6;color:var(--accent)}
+.pagination .page-buttons button:disabled{opacity:.4}
+.pagination .page-gap{min-width:20px;text-align:center;color:var(--muted)}

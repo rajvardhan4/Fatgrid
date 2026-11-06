@@ -1,6 +1,6 @@
 'use client';
 import {createContext,useContext,useEffect,useLayoutEffect,useRef,useState,type FormEvent} from 'react';
-import {AlertCircle,ArrowUpDown,Folder,Star,HelpCircle,Ban,Copy,Plus,FolderPlus,ThumbsDown,StickyNote,MoreHorizontal,Check,Eye,ExternalLink,Dices,Leaf,Bitcoin,Heart,ChartColumn,Pill,Link2} from 'lucide-react';
+import {ChevronLeft,ChevronRight,AlertCircle,ArrowUpDown,Folder,Star,HelpCircle,Ban,Copy,Plus,FolderPlus,ThumbsDown,StickyNote,MoreHorizontal,Check,Eye,ExternalLink,Dices,Leaf,Bitcoin,Heart,ChartColumn,Pill,Link2} from 'lucide-react';
 import {isDemo,NICHES,nichePrices} from '../shared/domain';
 import {countryName,flag} from '../shared/countries';
 export type Row=Record<string,any>;
@@ -28,6 +28,11 @@ export function Empty({title='No results',children}:{title?:string,children?:Rea
 // Column groups shown above the headers, as in the marketplace table.
 const groups:Record<string,string>={offers:'Offer',type:'Offer',category:'Offer',title:'Offer',language:'Offer',authority:'Authority',dr:'Authority',referring_domains:'Authority',country:'Traffic',traffic_top:'Traffic',all_traffic_top:'Traffic',traffic:'Traffic',monthly_min:'Traffic',all_traffic:'Traffic',follow:'Links',sponsored:'Links',restricted:'Niches',updated_at:'Platform',notes:'Your data',ref_to:'Your data',projects:'Your data',competitors:'Your data',match_score:'Your data'};
 const nicheIcons:Record<string,any>={casino:Dices,cbd:Leaf,crypto:Bitcoin,dating:Heart,forex:ChartColumn,pharma:Pill,other:Link2};
+// Page buttons: previous, numbers with ellipses (1 … 4 5 6 … 40) and next.
+export function PageButtons({page,pages,onPage}:{page:number,pages:number,onPage:(p:number)=>void}){
+ const last=Math.max(1,pages),items:(number|string)[]=[];
+ for(let p=1;p<=last;p++)if(p===1||p===last||Math.abs(p-page)<=1||(page<=3&&p<=4)||(page>=last-2&&p>=last-3))items.push(p);else if(items[items.length-1]!=='…'+(p<page?'a':'b'))items.push('…'+(p<page?'a':'b'));
+ return <div className="page-buttons"><button aria-label="Previous page" disabled={page<=1} onClick={()=>onPage(page-1)}><ChevronLeft size={14}/></button>{items.map(i=>typeof i==='number'?<button key={i} className={i===page?'chosen':''} aria-current={i===page?'page':undefined} onClick={()=>i!==page&&onPage(i)}>{i}</button>:<span key={i} className="page-gap">…</span>)}<button aria-label="Next page" disabled={page>=last} onClick={()=>onPage(page+1)}><ChevronRight size={14}/></button></div>}
 // Short niche names for tips ("Casino", "CBD", "Forex") and the tip itself, with the niche's price when known.
 // Niche prices read as whole dollars ("$57"), cents only when there are any.
 const nicheMoney=(v:number)=>'$'+v.toLocaleString('en-US',{maximumFractionDigits:2});
